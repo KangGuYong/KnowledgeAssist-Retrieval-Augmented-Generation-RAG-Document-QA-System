@@ -11,6 +11,10 @@ class SourceDocument(BaseModel):
     page: Optional[int] = Field(None, description="Page number (for PDFs)")
     chunk_index: int = Field(..., description="Chunk index in document")
     similarity_score: Optional[float] = Field(None, description="Relevance score")
+    image_urls: list[str] = Field(
+        default_factory=list,
+        description="이 청크가 속한 페이지에서 발견된 도표 이미지 URL 목록"
+    )
 
 
 class ChatResponse(BaseModel):

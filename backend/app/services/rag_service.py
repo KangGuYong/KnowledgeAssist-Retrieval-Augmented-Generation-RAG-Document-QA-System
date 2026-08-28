@@ -108,13 +108,22 @@ class RAGService:
         formatted_sources = []
 
         for doc in source_docs:
+            document_id = doc.metadata.get("document_id", "")
+            image_ids = doc.metadata.get("image_ids") or []
+            image_urls = (
+                [f"/api/v1/documents/{document_id}/images/{image_id}" for image_id in image_ids]
+                if document_id
+                else []
+            )
+
             source = SourceDocument(
                 content=doc.page_content,
                 document_name=doc.metadata.get("filename", "Unknown"),
-                document_id=doc.metadata.get("document_id", ""),
+                document_id=document_id,
                 page=doc.metadata.get("page"),
                 chunk_index=doc.metadata.get("chunk_index", 0),
-                similarity_score=None  # Can add if using similarity_search_with_score
+                similarity_score=None,  # Can add if using similarity_search_with_score
+                image_urls=image_urls,
             )
             formatted_sources.append(source)
 
