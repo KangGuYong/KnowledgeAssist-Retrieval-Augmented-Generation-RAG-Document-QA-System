@@ -128,7 +128,10 @@ class RAGService:
 
         for doc in source_docs:
             document_id = doc.metadata.get("document_id", "")
-            image_ids = doc.metadata.get("image_ids") or []
+            # Chroma metadata can only hold scalars, so image_ids is stored as a
+            # comma-joined string (document_processor.load_pdf); split it back out.
+            image_ids_raw = doc.metadata.get("image_ids") or ""
+            image_ids = image_ids_raw.split(",") if image_ids_raw else []
             image_urls = (
                 [f"/api/v1/documents/{document_id}/images/{image_id}" for image_id in image_ids]
                 if document_id

@@ -18,7 +18,9 @@ def test_chunk_with_image_ids_gets_relative_image_urls():
         metadata={
             "filename": "고시.pdf", "document_id": "doc_abc123",
             "page": 1, "chunk_index": 7,
-            "image_ids": ["p2_a1b2c3", "p2_full"],
+            # Chroma metadata can only hold scalars, so image_ids is stored
+            # (and comes back from retrieval) as a comma-joined string.
+            "image_ids": "p2_a1b2c3,p2_full",
         },
     )
 
@@ -45,7 +47,7 @@ def test_missing_document_id_yields_no_urls_even_with_image_ids():
     """document_id가 없으면 깨진 링크를 만들지 않는다."""
     doc = Document(
         page_content="텍스트",
-        metadata={"filename": "고시.pdf", "chunk_index": 0, "image_ids": ["p0_x"]},
+        metadata={"filename": "고시.pdf", "chunk_index": 0, "image_ids": "p0_x"},
     )
 
     sources = _format([doc])

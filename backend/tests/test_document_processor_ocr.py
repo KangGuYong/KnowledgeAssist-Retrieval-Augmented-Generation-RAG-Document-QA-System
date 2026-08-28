@@ -78,7 +78,11 @@ def test_image_ids_are_carried_onto_every_chunk_from_that_page(tmp_path, monkeyp
 
     assert chunks
     assert all(c.metadata["image_ids"] for c in chunks)
-    image_id = chunks[0].metadata["image_ids"][0]
+    # Chroma metadata can only hold scalars (str/int/float/bool); a list value
+    # makes add_documents() raise "Expected metadata value to be a str, int,
+    # float or bool". image_ids must be a comma-joined string, not a list.
+    assert all(isinstance(c.metadata["image_ids"], str) for c in chunks)
+    image_id = chunks[0].metadata["image_ids"].split(",")[0]
     assert (tmp_path / "images" / "doc_test123" / f"{image_id}.png").exists()
 
 
@@ -89,4 +93,4 @@ def test_no_document_id_skips_image_saving(tmp_path):
     chunks = processor.process_file(_pdf_with_image(tmp_path), "diagram.pdf")
 
     assert chunks
-    assert all(c.metadata.get("image_ids", []) == [] for c in chunks)
+    assert all(c.metadata.get("image_ids", "") == "" for c in chunks)

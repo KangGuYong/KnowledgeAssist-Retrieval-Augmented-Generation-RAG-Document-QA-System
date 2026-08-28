@@ -78,7 +78,10 @@ class DocumentProcessor:
                         "ocr_used": page.ocr_image_count > 0,
                         "ocr_image_count": page.ocr_image_count,
                         "full_page_ocr": page.full_page_ocr,
-                        "image_ids": page.image_ids,
+                        # Chroma metadata values must be str/int/float/bool, so a
+                        # list can't be stored directly; image ids never contain
+                        # commas (see documents._SAFE_ID), so joining is lossless.
+                        "image_ids": ",".join(page.image_ids),
                     },
                 )
             )
