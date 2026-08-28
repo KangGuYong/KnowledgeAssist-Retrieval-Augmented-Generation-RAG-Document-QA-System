@@ -19,6 +19,12 @@ def test_defaults_use_the_korean_ppocrv5_recogniser():
     assert PaddleOCRService().rec_model_name == "korean_PP-OCRv5_mobile_rec"
 
 
+def test_image_storage_dir_defaults_alongside_other_storage_paths():
+    settings = Settings()
+
+    assert settings.image_storage_dir == "app/storage/images"
+
+
 def test_engine_is_not_loaded_until_the_first_call():
     service = PaddleOCRService()
 

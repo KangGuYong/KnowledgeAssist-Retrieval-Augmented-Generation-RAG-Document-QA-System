@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     ocr_block_prefix: str = "[이미지 텍스트]"
     ocr_keep_empty_placeholder: bool = False
     ocr_empty_placeholder: str = "[이미지]"
+    image_storage_dir: str = "app/storage/images"  # 도표 이미지 저장 경로
 
     # RAG Configuration
     chunk_size: int = 1000
