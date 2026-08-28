@@ -108,8 +108,14 @@ class VectorStoreService:
         return results
 
     def delete_by_document_id(self, document_id: str) -> None:
-        """Delete all chunks for a specific document."""
-        self.vector_store.delete(
-            where={"document_id": document_id}
-        )
+        """Delete all chunks for a specific document.
+
+        langchain_community.vectorstores.chroma.Chroma.delete() (as of 0.0.38)
+        only forwards `ids=` to the underlying chromadb collection and drops
+        `where=` into an unused **kwargs, so `self.vector_store.delete(where=...)`
+        silently does nothing until chromadb itself raises "You must provide
+        either ids, where, or where_document to delete." Call the underlying
+        collection directly, which still supports `where=` fully.
+        """
+        self.vector_store._collection.delete(where={"document_id": document_id})
         logger.info(f"Deleted chunks for document {document_id}")
