@@ -165,3 +165,70 @@ def test_unreadable_scanned_page_does_not_abort_the_document(tmp_path):
     assert len(pages) == 1
     assert pages[0].full_page_ocr is False
     assert pages[0].text == ""
+
+
+def test_image_block_is_saved_as_png(tmp_path):
+    """블록 단위 이미지는 image_dir에 PNG로 저장되고 page.image_ids에 실린다."""
+    image_dir = tmp_path / "images"
+    pdf_path = _build_pdf(tmp_path)
+
+    pages = extract_pages(pdf_path, ocr=StubOCR(), image_dir=image_dir)
+
+    assert len(pages[0].image_ids) == 1
+    image_id = pages[0].image_ids[0]
+    saved = image_dir / f"{image_id}.png"
+    assert saved.exists()
+    assert saved.stat().st_size > 0
+
+
+def test_no_image_dir_skips_saving_without_failing(tmp_path):
+    """image_dir=None이면(기존 호출부 호환) 저장을 건너뛰고 텍스트 추출은 그대로 동작한다."""
+    pdf_path = _build_pdf(tmp_path)
+
+    pages = extract_pages(pdf_path, ocr=StubOCR())
+
+    assert "스캔된 표 내용" in pages[0].text
+    assert pages[0].image_ids == []
+
+
+def test_repeated_image_across_pages_is_saved_once(tmp_path):
+    """같은 이미지 바이트가 여러 페이지에 반복돼도 같은 image_id, 같은 파일로 수렴한다."""
+    doc = fitz.open()
+    image_bytes = _image_bytes()
+    for _ in range(2):
+        page = doc.new_page()
+        page.insert_text((72, 60), "Header text that is long enough to keep")
+        page.insert_image(fitz.Rect(72, 200, 300, 380), stream=image_bytes)
+    pdf_path = tmp_path / "repeated.pdf"
+    doc.save(pdf_path)
+    doc.close()
+    image_dir = tmp_path / "images"
+
+    pages = extract_pages(str(pdf_path), ocr=StubOCR(), image_dir=image_dir)
+
+    assert pages[0].image_ids == pages[1].image_ids
+    assert len(list(image_dir.glob("*.png"))) == 1
+
+
+def test_image_save_failure_does_not_break_text_extraction(tmp_path):
+    """저장 디렉터리를 쓸 수 없어도 OCR 텍스트 추출은 실패하지 않는다."""
+    pdf_path = _build_pdf(tmp_path)
+    unwritable = tmp_path / "not_a_directory"
+    unwritable.write_text("occupied")  # 디렉터리로 만들 수 없는 경로
+
+    pages = extract_pages(pdf_path, ocr=StubOCR(), image_dir=unwritable)
+
+    assert "스캔된 표 내용" in pages[0].text
+    assert pages[0].image_ids == []
+
+
+def test_full_page_scan_is_saved_with_a_page_scoped_id(tmp_path):
+    """전체 페이지 OCR(스캔본/이미지 과다)도 하나의 이미지로 저장된다."""
+    path = _build_pdf(tmp_path, with_text=False, image_rect=(0, 0, 400, 600))
+    image_dir = tmp_path / "images"
+
+    pages = extract_pages(path, ocr=StubOCR(), image_dir=image_dir)
+
+    assert pages[0].full_page_ocr is True
+    assert pages[0].image_ids == ["p1_full"]
+    assert (image_dir / "p1_full.png").exists()
