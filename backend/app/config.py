@@ -67,7 +67,9 @@ class Settings(BaseSettings):
 
     # Chunking strategy
     chunking_strategy: str = "default"  # "default" | "semantic"
-    semantic_chunker_breakpoint_type: str = "percentile"  # percentile | standard_deviation | interquartile
+    # Distances above this percentile of all consecutive-sentence distances
+    # are treated as chunk breakpoints (5 Levels of Text Splitting, Level 4).
+    semantic_chunker_breakpoint_percentile: float = 95.0
 
     class Config:
         env_file = ".env"
