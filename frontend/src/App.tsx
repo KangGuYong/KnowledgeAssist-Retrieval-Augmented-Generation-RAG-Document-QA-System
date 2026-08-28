@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FileUploader } from './components/FileUploader';
 import { ChatWindow } from './components/ChatWindow';
 import './styles/App.css';

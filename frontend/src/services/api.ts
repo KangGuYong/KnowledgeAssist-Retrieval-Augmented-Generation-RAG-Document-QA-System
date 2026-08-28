@@ -1,8 +1,17 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { ChatRequest, ChatResponse, UploadResponse, DocumentInfo } from '../types/api.types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// Empty by default so requests go to the same origin and Vite's /api proxy
+// forwards them to the backend (no CORS involved). Set VITE_API_BASE_URL only
+// when the backend lives on a different origin than the frontend.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 const API_PREFIX = '/api/v1';
+
+// Quick metadata calls (list/delete) should fail fast.
+const DEFAULT_TIMEOUT = 30_000;
+// Chat and upload wait on the LLM and the embedding model, which routinely take
+// tens of seconds and can cold-start much slower.
+const LLM_TIMEOUT = 300_000;
 
 class ApiService {
   private client: AxiosInstance;
@@ -13,7 +22,7 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 60000, // 60 seconds for LLM responses
+      timeout: DEFAULT_TIMEOUT,
     });
 
     // Response interceptor for error handling
@@ -24,6 +33,10 @@ class ApiService {
           console.error('API Error:', error.response.data);
           throw new Error(
             (error.response.data as any)?.detail || 'An error occurred'
+          );
+        } else if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+          throw new Error(
+            'The server took too long to respond. The model may still be working — try again, or ask a shorter question.'
           );
         } else if (error.request) {
           throw new Error('No response from server. Please check your connection.');
@@ -48,6 +61,7 @@ class ApiService {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: LLM_TIMEOUT,
       }
     );
 
@@ -70,6 +84,7 @@ class ApiService {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: LLM_TIMEOUT,
       }
     );
 
@@ -80,7 +95,9 @@ class ApiService {
    * Send a chat message
    */
   async sendMessage(request: ChatRequest): Promise<ChatResponse> {
-    const response = await this.client.post<ChatResponse>('/chat/', request);
+    const response = await this.client.post<ChatResponse>('/chat/', request, {
+      timeout: LLM_TIMEOUT,
+    });
     return response.data;
   }
 
