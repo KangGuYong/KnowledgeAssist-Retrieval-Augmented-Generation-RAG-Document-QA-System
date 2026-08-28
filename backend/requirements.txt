@@ -6,8 +6,12 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # RAG Pipeline
-langchain==0.1.0
-langchain-community==0.0.10
+# Bumped from 0.1.0/0.0.10 to satisfy langchain-experimental==0.0.55 (SemanticChunker),
+# which requires langchain>=0.1.13,<0.2. Stays within the 0.1.x/0.0.x line, not the
+# breaking 0.2.x jump (langchain-experimental>=0.0.60 needs langchain-core>=0.2).
+langchain==0.1.20
+langchain-community==0.0.38
+langchain-experimental==0.0.55
 chromadb==0.4.22
 sentence-transformers==3.3.1
 
