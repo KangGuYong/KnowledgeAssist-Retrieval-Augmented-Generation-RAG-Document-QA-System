@@ -53,6 +53,7 @@ class UploadResponse(BaseModel):
     num_chunks: int = Field(..., description="Number of chunks created")
     status: str = Field(default="processed", description="Processing status")
     message: str = Field(..., description="Status message")
+    chunking_strategy: str = Field(default="default", description="Chunking strategy used: default | semantic")
 
 
 class DocumentInfo(BaseModel):

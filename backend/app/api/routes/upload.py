@@ -1,12 +1,13 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 from pathlib import Path
 import aiofiles
 import uuid
 import logging
-from typing import List
+from typing import List, Optional
 
 from app.config import get_settings
 from app.api.models.responses import UploadResponse
+from app.services.chunking import VALID_STRATEGIES
 from app.services.document_processor import DocumentProcessor
 from app.services.vector_store import VectorStoreService
 
@@ -19,14 +20,21 @@ doc_processor = DocumentProcessor()
 vector_service = VectorStoreService()
 
 
-@router.post("/", response_model=UploadResponse)
-async def upload_file(
-    file: UploadFile = File(...)
+async def _process_upload(
+    file: UploadFile,
+    chunking_strategy: str,
+    chunk_size: Optional[int],
+    chunk_overlap: Optional[int],
 ) -> UploadResponse:
     """
     Upload and process a single document.
 
-    This endpoint:
+    This is the shared logic behind both `/` and `/batch` - kept as a plain
+    function (not the route handler itself) because upload_multiple_files
+    calls it directly per file, and FastAPI's Form(...) defaults only
+    resolve to real values through the dependency-injection path, not when
+    called as an ordinary Python function.
+
     1. Validates the file type and size
     2. Saves the file temporarily
     3. Loads and chunks the document
@@ -73,7 +81,10 @@ async def upload_file(
         chunks = doc_processor.process_file(
             str(file_path),
             file.filename,
-            document_id=document_id
+            document_id=document_id,
+            chunking_strategy=chunking_strategy,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
         # Add to vector store
@@ -84,7 +95,8 @@ async def upload_file(
             filename=file.filename,
             num_chunks=len(chunks),
             status="processed",
-            message=f"Successfully processed {file.filename}"
+            message=f"Successfully processed {file.filename}",
+            chunking_strategy=chunking_strategy,
         )
 
     except Exception as e:
@@ -99,18 +111,48 @@ async def upload_file(
         )
 
 
+@router.post("/", response_model=UploadResponse)
+async def upload_file(
+    file: UploadFile = File(...),
+    chunking_strategy: str = Form(settings.chunking_strategy),
+    chunk_size: Optional[int] = Form(None),
+    chunk_overlap: Optional[int] = Form(None),
+) -> UploadResponse:
+    """Upload and process a single document."""
+    if chunking_strategy not in VALID_STRATEGIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown chunking_strategy: {chunking_strategy}. Allowed: {sorted(VALID_STRATEGIES)}"
+        )
+
+    return await _process_upload(file, chunking_strategy, chunk_size, chunk_overlap)
+
+
 @router.post("/batch", response_model=List[UploadResponse])
 async def upload_multiple_files(
-    files: List[UploadFile] = File(...)
+    files: List[UploadFile] = File(...),
+    chunking_strategy: str = Form(settings.chunking_strategy),
+    chunk_size: Optional[int] = Form(None),
+    chunk_overlap: Optional[int] = Form(None),
 ) -> List[UploadResponse]:
     """
     Upload and process multiple documents.
+
+    chunking_strategy/chunk_size/chunk_overlap are shared across every file
+    in the batch - to use different settings per file, upload them one at a
+    time via `/`.
     """
+    if chunking_strategy not in VALID_STRATEGIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown chunking_strategy: {chunking_strategy}. Allowed: {sorted(VALID_STRATEGIES)}"
+        )
+
     responses = []
 
     for file in files:
         try:
-            response = await upload_file(file)
+            response = await _process_upload(file, chunking_strategy, chunk_size, chunk_overlap)
             responses.append(response)
         except HTTPException as e:
             # Continue processing other files even if one fails
@@ -121,7 +163,8 @@ async def upload_multiple_files(
                     filename=file.filename,
                     num_chunks=0,
                     status="failed",
-                    message=e.detail
+                    message=e.detail,
+                    chunking_strategy=chunking_strategy,
                 )
             )
 
