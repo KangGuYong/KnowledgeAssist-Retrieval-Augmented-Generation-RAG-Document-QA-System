@@ -13,6 +13,7 @@ export interface SourceDocument {
   page?: number;
   chunk_index: number;
   similarity_score?: number;
+  image_urls: string[];
 }
 
 export interface ChatResponse {
