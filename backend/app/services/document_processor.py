@@ -1,4 +1,3 @@
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_community.document_loaders import (
     PyPDFLoader,
@@ -10,6 +9,7 @@ import logging
 from typing import Optional
 
 from app.config import get_settings
+from app.services.chunking import build_splitter
 from app.services.pdf_ocr import PdfPage, extract_pages
 
 logger = logging.getLogger(__name__)
@@ -22,12 +22,6 @@ class DocumentProcessor:
     def __init__(self, ocr=None):
         # Defaults to the shared PaddleOCR service; injectable for tests.
         self.ocr = ocr
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-            length_function=len,
-            separators=["\n\n", "\n", ". ", " ", ""]
-        )
 
     def load_pdf(
         self,
@@ -132,7 +126,10 @@ class DocumentProcessor:
     def chunk_documents(
         self,
         documents: list[Document],
-        filename: str
+        filename: str,
+        chunking_strategy: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ) -> list[Document]:
         """
         Split documents into chunks.
@@ -140,18 +137,34 @@ class DocumentProcessor:
         Args:
             documents: List of Document objects
             filename: Original filename for metadata
+            chunking_strategy: "default" or "semantic"; falls back to
+                settings.chunking_strategy when not given.
+            chunk_size: Only used by "default"; falls back to settings.chunk_size.
+            chunk_overlap: Only used by "default"; falls back to settings.chunk_overlap.
 
         Returns:
             List of chunked Document objects
         """
-        chunks = self.text_splitter.split_documents(documents)
+        strategy = chunking_strategy or settings.chunking_strategy
+        resolved_chunk_size = chunk_size if chunk_size is not None else settings.chunk_size
+        resolved_chunk_overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
 
-        # Add chunk index to metadata
+        splitter = build_splitter(strategy, resolved_chunk_size, resolved_chunk_overlap)
+        chunks = splitter.split_documents(documents)
+
         for idx, chunk in enumerate(chunks):
             chunk.metadata["chunk_index"] = idx
             chunk.metadata["filename"] = filename
+            chunk.metadata["chunking_strategy"] = strategy
+            # Chroma metadata must be scalar (str/int/float/bool); None is
+            # rejected outright (same failure mode already hit with image_ids,
+            # see commit af38b9f). chunk_size/overlap only apply to "default",
+            # so omit the keys for "semantic" rather than writing None.
+            if strategy == "default":
+                chunk.metadata["chunk_size"] = resolved_chunk_size
+                chunk.metadata["chunk_overlap"] = resolved_chunk_overlap
 
-        logger.info(f"Created {len(chunks)} chunks from {filename}")
+        logger.info(f"Created {len(chunks)} chunks from {filename} using {strategy} chunking")
         return chunks
 
     def process_file(
@@ -159,6 +172,9 @@ class DocumentProcessor:
         file_path: str,
         filename: str,
         document_id: Optional[str] = None,
+        chunking_strategy: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ) -> list[Document]:
         """
         Complete processing pipeline: load and chunk.
@@ -167,11 +183,16 @@ class DocumentProcessor:
             file_path: Path to the file
             filename: Original filename
             document_id: Document ID; forwarded to load_document to scope saved images.
+            chunking_strategy: "default" or "semantic"; forwarded to chunk_documents.
+            chunk_size: Only used by "default"; forwarded to chunk_documents.
+            chunk_overlap: Only used by "default"; forwarded to chunk_documents.
 
         Returns:
             List of chunked Document objects ready for embedding
         """
         documents = self.load_document(file_path, filename, document_id)
-        chunks = self.chunk_documents(documents, filename)
+        chunks = self.chunk_documents(
+            documents, filename, chunking_strategy, chunk_size, chunk_overlap
+        )
 
         return chunks
