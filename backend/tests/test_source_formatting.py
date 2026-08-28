@@ -53,3 +53,27 @@ def test_missing_document_id_yields_no_urls_even_with_image_ids():
     sources = _format([doc])
 
     assert sources[0].image_urls == []
+
+
+def test_similarity_score_is_read_from_metadata():
+    """ScoringRetriever가 채워 넣은 점수를 그대로 응답에 실어 보낸다."""
+    doc = Document(
+        page_content="텍스트",
+        metadata={"filename": "고시.pdf", "chunk_index": 0, "similarity_score": 0.8321},
+    )
+
+    sources = _format([doc])
+
+    assert sources[0].similarity_score == 0.8321
+
+
+def test_missing_similarity_score_is_none_not_zero():
+    """점수가 없을 때 0.0으로 오해되면 프런트에서 'Relevance: 0.0%'로 잘못 표시된다."""
+    doc = Document(
+        page_content="텍스트",
+        metadata={"filename": "고시.pdf", "chunk_index": 0},
+    )
+
+    sources = _format([doc])
+
+    assert sources[0].similarity_score is None

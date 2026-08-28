@@ -50,7 +50,7 @@ export const SourceCitation: React.FC<SourceCitationProps> = ({ source, index })
         <p>{source.content}</p>
       </div>
 
-      {source.similarity_score !== undefined && (
+      {source.similarity_score != null && (
         <div className="source-score">
           Relevance: {(source.similarity_score * 100).toFixed(1)}%
         </div>

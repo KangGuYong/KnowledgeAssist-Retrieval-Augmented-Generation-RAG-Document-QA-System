@@ -12,7 +12,7 @@ export interface SourceDocument {
   document_id: string;
   page?: number;
   chunk_index: number;
-  similarity_score?: number;
+  similarity_score: number | null;
   image_urls: string[];
 }
 
