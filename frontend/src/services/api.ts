@@ -1,5 +1,16 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { ChatRequest, ChatResponse, UploadResponse, DocumentInfo } from '../types/api.types';
+import { ChatRequest, ChatResponse, UploadResponse, UploadOptions, DocumentInfo } from '../types/api.types';
+
+function appendUploadOptions(formData: FormData, options?: UploadOptions): void {
+  if (!options) return;
+  formData.append('chunking_strategy', options.chunkingStrategy);
+  if (options.chunkSize !== undefined) {
+    formData.append('chunk_size', String(options.chunkSize));
+  }
+  if (options.chunkOverlap !== undefined) {
+    formData.append('chunk_overlap', String(options.chunkOverlap));
+  }
+}
 
 // Empty by default so requests go to the same origin and Vite's /api proxy
 // forwards them to the backend (no CORS involved). Set VITE_API_BASE_URL only
@@ -50,9 +61,10 @@ class ApiService {
   /**
    * Upload a single file
    */
-  async uploadFile(file: File): Promise<UploadResponse> {
+  async uploadFile(file: File, options?: UploadOptions): Promise<UploadResponse> {
     const formData = new FormData();
     formData.append('file', file);
+    appendUploadOptions(formData, options);
 
     const response = await this.client.post<UploadResponse>(
       '/upload/',
@@ -69,13 +81,14 @@ class ApiService {
   }
 
   /**
-   * Upload multiple files
+   * Upload multiple files. options apply to every file in the batch.
    */
-  async uploadFiles(files: File[]): Promise<UploadResponse[]> {
+  async uploadFiles(files: File[], options?: UploadOptions): Promise<UploadResponse[]> {
     const formData = new FormData();
     files.forEach((file) => {
       formData.append('files', file);
     });
+    appendUploadOptions(formData, options);
 
     const response = await this.client.post<UploadResponse[]>(
       '/upload/batch',

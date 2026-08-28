@@ -30,6 +30,16 @@ export interface UploadResponse {
   num_chunks: number;
   status: string;
   message: string;
+  chunking_strategy: string;
+}
+
+export type ChunkingStrategy = 'default' | 'semantic';
+
+export interface UploadOptions {
+  chunkingStrategy: ChunkingStrategy;
+  /** "default" 전략에서만 쓰인다. 값을 주지 않으면 서버 기본값을 쓴다. */
+  chunkSize?: number;
+  chunkOverlap?: number;
 }
 
 export interface DocumentInfo {
