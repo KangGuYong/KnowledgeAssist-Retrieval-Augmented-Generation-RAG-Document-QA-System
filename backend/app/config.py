@@ -63,7 +63,11 @@ class Settings(BaseSettings):
     # RAG Configuration
     chunk_size: int = 1000
     chunk_overlap: int = 200
-    retrieval_k: int = 4  # Number of chunks to retrieve
+    retrieval_k: int = 10  # Number of chunks to retrieve
+
+    # Chunking strategy
+    chunking_strategy: str = "default"  # "default" | "semantic"
+    semantic_chunker_breakpoint_type: str = "percentile"  # percentile | standard_deviation | interquartile
 
     class Config:
         env_file = ".env"
