@@ -20,3 +20,11 @@ def test_rag_service_builds_an_ollama_chat_model():
 
     assert llm.model == "gemma4:26b-a4b-it-q4_K_M"
     assert llm.base_url == "http://192.168.0.169:11434"
+
+
+def test_qa_prompt_warns_about_ocr_marker():
+    from app.services.rag_service import QA_PROMPT
+
+    assert "[이미지 텍스트]" in QA_PROMPT.template
+    assert "{context}" in QA_PROMPT.template
+    assert "{question}" in QA_PROMPT.template

@@ -1,5 +1,6 @@
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
 from langchain_community.chat_models import ChatOllama
 from typing import Optional, Dict
 import logging
@@ -11,6 +12,23 @@ from app.api.models.responses import SourceDocument
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# 문맥 중 '[이미지 텍스트]'는 OCR로 추출된 것이라 오탈자가 있을 수 있다. 청크
+# 본문에 이미 인라인으로 박혀 있으므로(pdf_ocr._format_ocr_block), 여기서는 LLM에게
+# 그 마커를 어떻게 다뤄야 하는지만 알려준다.
+QA_PROMPT = PromptTemplate(
+    template="""다음 문맥을 참고해 질문에 답하라.
+문맥 중 '[이미지 텍스트]'로 표시된 부분은 문서의 도표·이미지에서 문자 인식(OCR)으로
+추출한 것이라 오탈자가 있을 수 있다. 이를 근거로 답할 때는 인명·지명 등 고유명사를
+단정하지 말고, 해당 페이지의 도표를 직접 확인하도록 안내하라.
+
+문맥:
+{context}
+
+질문: {question}
+답변:""",
+    input_variables=["context", "question"],
+)
 
 
 class RAGService:
@@ -82,6 +100,7 @@ class RAGService:
             retriever=retriever,
             memory=memory,
             return_source_documents=True,
+            combine_docs_chain_kwargs={"prompt": QA_PROMPT},
             verbose=True
         )
 
