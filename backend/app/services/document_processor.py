@@ -29,7 +29,12 @@ class DocumentProcessor:
             separators=["\n\n", "\n", ". ", " ", ""]
         )
 
-    def load_pdf(self, file_path: str, filename: str) -> list[Document]:
+    def load_pdf(
+        self,
+        file_path: str,
+        filename: str,
+        document_id: Optional[str] = None,
+    ) -> list[Document]:
         """
         Load a PDF, replacing image regions with their OCR text.
 
@@ -39,6 +44,9 @@ class DocumentProcessor:
         Args:
             file_path: Path to the PDF
             filename: Original filename
+            document_id: Document ID; required to persist extracted images.
+                Without it, text extraction proceeds unchanged and no images
+                are saved.
 
         Returns:
             List of Document objects, one per page
@@ -46,8 +54,10 @@ class DocumentProcessor:
         if not settings.ocr_enabled:
             return PyPDFLoader(file_path).load()
 
+        image_dir = Path(settings.image_storage_dir) / document_id if document_id else None
+
         try:
-            pages: list[PdfPage] = extract_pages(file_path, ocr=self.ocr)
+            pages: list[PdfPage] = extract_pages(file_path, ocr=self.ocr, image_dir=image_dir)
         except Exception as e:
             logger.warning(
                 f"OCR extraction failed for {filename} ({e}); "
@@ -68,19 +78,26 @@ class DocumentProcessor:
                         "ocr_used": page.ocr_image_count > 0,
                         "ocr_image_count": page.ocr_image_count,
                         "full_page_ocr": page.full_page_ocr,
+                        "image_ids": page.image_ids,
                     },
                 )
             )
 
         return documents
 
-    def load_document(self, file_path: str, filename: str) -> list[Document]:
+    def load_document(
+        self,
+        file_path: str,
+        filename: str,
+        document_id: Optional[str] = None,
+    ) -> list[Document]:
         """
         Load a document based on file extension.
 
         Args:
             file_path: Path to the file
             filename: Original filename
+            document_id: Document ID; forwarded to load_pdf to scope saved images.
 
         Returns:
             List of Document objects
@@ -89,7 +106,7 @@ class DocumentProcessor:
 
         try:
             if file_extension == ".pdf":
-                documents = self.load_pdf(file_path, filename)
+                documents = self.load_pdf(file_path, filename, document_id)
             elif file_extension == ".txt":
                 documents = TextLoader(file_path, encoding='utf-8').load()
             elif file_extension == ".docx":
@@ -137,7 +154,8 @@ class DocumentProcessor:
     def process_file(
         self,
         file_path: str,
-        filename: str
+        filename: str,
+        document_id: Optional[str] = None,
     ) -> list[Document]:
         """
         Complete processing pipeline: load and chunk.
@@ -145,11 +163,12 @@ class DocumentProcessor:
         Args:
             file_path: Path to the file
             filename: Original filename
+            document_id: Document ID; forwarded to load_document to scope saved images.
 
         Returns:
             List of chunked Document objects ready for embedding
         """
-        documents = self.load_document(file_path, filename)
+        documents = self.load_document(file_path, filename, document_id)
         chunks = self.chunk_documents(documents, filename)
 
         return chunks

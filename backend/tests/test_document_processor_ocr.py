@@ -62,3 +62,31 @@ def test_ocr_can_be_turned_off(tmp_path, monkeypatch):
     joined = "\n".join(c.page_content for c in chunks)
     assert "무시되어야 하는 텍스트" not in joined
     assert "Native text before the diagram" in joined
+
+
+def test_image_ids_are_carried_onto_every_chunk_from_that_page(tmp_path, monkeypatch):
+    """청크-이미지 연결은 페이지 단위 근사다(설계 문서 3.1절):
+    그 페이지에서 나온 모든 청크가 그 페이지의 이미지 전부를 인용한다."""
+    from app.services import document_processor as module
+
+    monkeypatch.setattr(module.settings, "image_storage_dir", str(tmp_path / "images"))
+    processor = DocumentProcessor(ocr=StubOCR("그림 안의 설명 문장"))
+
+    chunks = processor.process_file(
+        _pdf_with_image(tmp_path), "diagram.pdf", document_id="doc_test123"
+    )
+
+    assert chunks
+    assert all(c.metadata["image_ids"] for c in chunks)
+    image_id = chunks[0].metadata["image_ids"][0]
+    assert (tmp_path / "images" / "doc_test123" / f"{image_id}.png").exists()
+
+
+def test_no_document_id_skips_image_saving(tmp_path):
+    """document_id 없이 호출하는 기존 방식(테스트 등)은 그대로 동작해야 한다."""
+    processor = DocumentProcessor(ocr=StubOCR("그림 안의 설명 문장"))
+
+    chunks = processor.process_file(_pdf_with_image(tmp_path), "diagram.pdf")
+
+    assert chunks
+    assert all(c.metadata.get("image_ids", []) == [] for c in chunks)

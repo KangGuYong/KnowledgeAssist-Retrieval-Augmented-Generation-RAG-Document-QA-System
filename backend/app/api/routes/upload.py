@@ -72,7 +72,8 @@ async def upload_file(
         # Process document (load and chunk)
         chunks = doc_processor.process_file(
             str(file_path),
-            file.filename
+            file.filename,
+            document_id=document_id
         )
 
         # Add to vector store
