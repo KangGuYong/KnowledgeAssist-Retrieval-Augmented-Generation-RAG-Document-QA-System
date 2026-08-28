@@ -12,7 +12,12 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # CORS
-    allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    allowed_origins: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
 
     # File Upload
     max_upload_size: int = 10 * 1024 * 1024  # 10MB
@@ -21,18 +26,38 @@ class Settings(BaseSettings):
 
     # Vector Store
     chroma_persist_dir: str = "app/storage/chroma_db"
-    collection_name: str = "documents"
+    collection_name: str = "documents_kure_v1"
 
     # Embeddings
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model: str = "nlpai-lab/KURE-v1"
 
     # LLM Configuration
-    llm_provider: str = "anthropic"  # or "openai"
-    anthropic_api_key: str = ""
-    openai_api_key: str = ""
-    llm_model: str = "claude-3-5-sonnet-20241022"  # or "gpt-4-turbo"
+    llm_provider: str = "ollama"
+    ollama_base_url: str = "http://192.168.0.169:11434"
+    llm_model: str = "gemma4:26b-a4b-it-q4_K_M"
     llm_temperature: float = 0.0
     max_tokens: int = 2000
+
+    # OCR (PDF image regions -> text)
+    ocr_enabled: bool = True
+    ocr_rec_model: str = "korean_PP-OCRv5_mobile_rec"
+    ocr_det_model: str = "PP-OCRv5_mobile_det"
+    ocr_device: str = "cpu"  # "cpu", "gpu", "gpu:0", ...
+    ocr_min_score: float = 0.5  # Drop recognitions below this confidence
+    ocr_use_textline_orientation: bool = False
+    # PaddleOCR segfaults in a process that has torch loaded (paddlex imports
+    # modelscope, which imports torch), so OCR runs in its own process.
+    ocr_isolate_process: bool = True
+    ocr_timeout: float = 120.0  # Per image, in the worker process
+    ocr_dpi: int = 200  # Render resolution for image regions
+    ocr_min_image_size: float = 40.0  # Skip icons/rules smaller than this (pt)
+    ocr_max_images_per_page: int = 20  # Above this, OCR the whole page once
+    ocr_page_text_threshold: int = 30  # Fewer native chars => treat as scanned
+    ocr_row_tolerance: float = 10.0  # Blocks within this gap (pt) share a row
+    ocr_layout_order: str = "position"  # "position" or "native" block order
+    ocr_block_prefix: str = "[이미지 텍스트]"
+    ocr_keep_empty_placeholder: bool = False
+    ocr_empty_placeholder: str = "[이미지]"
 
     # RAG Configuration
     chunk_size: int = 1000

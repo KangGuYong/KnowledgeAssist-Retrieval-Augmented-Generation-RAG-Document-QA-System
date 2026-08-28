@@ -8,15 +8,22 @@ pydantic-settings==2.1.0
 # RAG Pipeline
 langchain==0.1.0
 langchain-community==0.0.10
-langchain-anthropic==0.1.1
 chromadb==0.4.22
-sentence-transformers==2.2.2
+sentence-transformers==3.3.1
 
 # Document Processing
 pypdf==4.0.0
 python-docx==1.1.0
-unstructured==0.12.0
 tiktoken==0.5.2
+
+# OCR (replaces PDF image regions with text)
+# 3.2.2 is the newest paddlepaddle with Linux aarch64 wheels on PyPI; 3.3.x
+# publishes those only on PaddlePaddle's own index. For the CUDA build (or a
+# newer version on aarch64), install paddle separately from:
+#   https://www.paddlepaddle.org.cn/packages/stable/cpu/
+paddlepaddle==3.2.2
+paddleocr==3.7.0
+PyMuPDF==1.28.2
 
 # Utilities
 python-dotenv==1.0.0

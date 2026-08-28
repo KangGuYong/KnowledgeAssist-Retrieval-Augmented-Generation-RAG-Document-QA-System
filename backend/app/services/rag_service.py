@@ -1,7 +1,6 @@
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from langchain_anthropic import ChatAnthropic
-from langchain_openai import ChatOpenAI
+from langchain_community.chat_models import ChatOllama
 from typing import Optional, Dict
 import logging
 import uuid
@@ -25,22 +24,14 @@ class RAGService:
 
     def _initialize_llm(self):
         """Initialize the LLM based on provider setting."""
-        if settings.llm_provider == "anthropic":
-            return ChatAnthropic(
-                api_key=settings.anthropic_api_key,
-                model=settings.llm_model,
-                temperature=settings.llm_temperature,
-                max_tokens=settings.max_tokens
-            )
-        elif settings.llm_provider == "openai":
-            return ChatOpenAI(
-                api_key=settings.openai_api_key,
-                model=settings.llm_model,
-                temperature=settings.llm_temperature,
-                max_tokens=settings.max_tokens
-            )
-        else:
+        if settings.llm_provider != "ollama":
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+
+        return ChatOllama(
+            base_url=settings.ollama_base_url,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
+        )
 
     def _get_or_create_memory(self, conversation_id: str) -> ConversationBufferMemory:
         """Get existing conversation memory or create new one."""
