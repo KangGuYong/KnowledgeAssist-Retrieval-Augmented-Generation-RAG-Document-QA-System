@@ -11,6 +11,7 @@ from typing import Optional
 from app.config import get_settings
 from app.services.chunking import build_splitter
 from app.services.mineru_client import PdfPage, parse_and_build_pages
+from app.services import parsed_store
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -61,9 +62,13 @@ class DocumentProcessor:
 
                 ocr = get_ocr_service()
 
+        on_parsed = None
+        if document_id:
+            on_parsed = lambda result: parsed_store.save(document_id, filename, result, image_dir)
+
         try:
             pages: list[PdfPage] = parse_and_build_pages(
-                file_path, ocr=ocr, image_dir=image_dir, client=self.mineru_client
+                file_path, ocr=ocr, image_dir=image_dir, client=self.mineru_client, on_parsed=on_parsed
             )
         except Exception as e:
             logger.warning(
