@@ -1,7 +1,11 @@
+from langchain.callbacks.manager import CallbackManagerForRetrieverRun
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
+from langchain.schema import Document
+from langchain.schema.retriever import BaseRetriever
 from langchain_community.chat_models import ChatOllama
-from typing import Optional, Dict
+from typing import Any, Dict, List, Optional
 import logging
 import uuid
 
@@ -11,6 +15,47 @@ from app.api.models.responses import SourceDocument
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# 문맥 중 '[이미지 텍스트]'는 OCR로 추출된 것이라 오탈자가 있을 수 있다. 청크
+# 본문에 이미 인라인으로 박혀 있으므로(mineru_client._format_ocr_block), 여기서는 LLM에게
+# 그 마커를 어떻게 다뤄야 하는지만 알려준다.
+QA_PROMPT = PromptTemplate(
+    template="""다음 문맥을 참고해 질문에 답하라.
+문맥 중 '[이미지 텍스트]'로 표시된 부분은 문서의 도표·이미지에서 문자 인식(OCR)으로
+추출한 것이라 오탈자가 있을 수 있다. 이를 근거로 답할 때는 인명·지명 등 고유명사를
+단정하지 말고, 해당 페이지의 도표를 직접 확인하도록 안내하라.
+
+문맥:
+{context}
+
+질문: {question}
+답변:""",
+    input_variables=["context", "question"],
+)
+
+
+class ScoringRetriever(BaseRetriever):
+    """검색 결과에 유사도 점수를 메타데이터로 실어 보낸다.
+
+    vector_store.as_retriever()가 반환하는 기본 리트리버는 문서만 돌려주고
+    점수를 버린다. similarity_search_with_relevance_scores를 직접 호출해
+    doc.metadata['similarity_score']에 채워, 답변 생성과 동일한 검색 결과에서
+    나온 점수를 그대로 출처 응답까지 이어지게 한다.
+    """
+
+    vector_store: Any
+    k: int
+    search_filter: Optional[dict] = None
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> List[Document]:
+        results = self.vector_store.similarity_search_with_relevance_scores(
+            query, k=self.k, filter=self.search_filter
+        )
+        for doc, score in results:
+            doc.metadata["similarity_score"] = score
+        return [doc for doc, _ in results]
 
 
 class RAGService:
@@ -72,8 +117,10 @@ class RAGService:
         if document_ids:
             search_kwargs["filter"] = {"document_id": {"$in": document_ids}}
 
-        retriever = self.vector_store.as_retriever(
-            search_kwargs=search_kwargs
+        retriever = ScoringRetriever(
+            vector_store=self.vector_store,
+            k=search_kwargs["k"],
+            search_filter=search_kwargs.get("filter"),
         )
 
         # Create conversational chain
@@ -82,6 +129,7 @@ class RAGService:
             retriever=retriever,
             memory=memory,
             return_source_documents=True,
+            combine_docs_chain_kwargs={"prompt": QA_PROMPT},
             verbose=True
         )
 
@@ -108,13 +156,25 @@ class RAGService:
         formatted_sources = []
 
         for doc in source_docs:
+            document_id = doc.metadata.get("document_id", "")
+            # Chroma metadata can only hold scalars, so image_ids is stored as a
+            # comma-joined string (document_processor.load_pdf); split it back out.
+            image_ids_raw = doc.metadata.get("image_ids") or ""
+            image_ids = image_ids_raw.split(",") if image_ids_raw else []
+            image_urls = (
+                [f"/api/v1/documents/{document_id}/images/{image_id}" for image_id in image_ids]
+                if document_id
+                else []
+            )
+
             source = SourceDocument(
                 content=doc.page_content,
                 document_name=doc.metadata.get("filename", "Unknown"),
-                document_id=doc.metadata.get("document_id", ""),
+                document_id=document_id,
                 page=doc.metadata.get("page"),
                 chunk_index=doc.metadata.get("chunk_index", 0),
-                similarity_score=None  # Can add if using similarity_search_with_score
+                similarity_score=doc.metadata.get("similarity_score"),
+                image_urls=image_urls,
             )
             formatted_sources.append(source)
 

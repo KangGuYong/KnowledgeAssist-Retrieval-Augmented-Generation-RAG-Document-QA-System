@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, FileText, X, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, FileText, X, CheckCircle, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiService } from '../services/api';
 import { UploadedFile } from '../types/chat.types';
+import { ChunkingStrategy, UploadOptions } from '../types/api.types';
 import '../styles/FileUploader.css';
 
 interface FileUploaderProps {
@@ -17,11 +18,22 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [chunkingStrategy, setChunkingStrategy] = useState<ChunkingStrategy>('default');
+  const [chunkSize, setChunkSize] = useState('');
+  const [chunkOverlap, setChunkOverlap] = useState('');
+
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return;
 
       setIsUploading(true);
+
+      const options: UploadOptions = {
+        chunkingStrategy,
+        ...(chunkingStrategy === 'default' && chunkSize !== '' ? { chunkSize: Number(chunkSize) } : {}),
+        ...(chunkingStrategy === 'default' && chunkOverlap !== '' ? { chunkOverlap: Number(chunkOverlap) } : {}),
+      };
 
       // Add files to state with uploading status
       const newFiles: UploadedFile[] = acceptedFiles.map((file) => ({
@@ -41,7 +53,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         const tempId = newFiles[i].id;
 
         try {
-          const response = await apiService.uploadFile(file);
+          const response = await apiService.uploadFile(file, options);
 
           // Update file status to success
           setUploadedFiles((prev) =>
@@ -81,7 +93,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         onUploadComplete(uploadedDocIds);
       }
     },
-    [onUploadComplete]
+    [onUploadComplete, chunkingStrategy, chunkSize, chunkOverlap]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -109,6 +121,60 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
 
   return (
     <div className="file-uploader">
+      <div className="upload-options">
+        <button
+          className="advanced-options-toggle"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          type="button"
+        >
+          <span>고급 설정 (청킹)</span>
+          {showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+
+        {showAdvanced && (
+          <div className="advanced-options-panel">
+            <label className="option-field">
+              <span>청킹 전략</span>
+              <select
+                value={chunkingStrategy}
+                onChange={(e) => setChunkingStrategy(e.target.value as ChunkingStrategy)}
+                disabled={isUploading}
+              >
+                <option value="default">기본 (문자 수 기준)</option>
+                <option value="semantic">시멘틱 (의미 단위)</option>
+              </select>
+            </label>
+
+            {chunkingStrategy === 'default' && (
+              <>
+                <label className="option-field">
+                  <span>Chunk Size</span>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="기본값 사용"
+                    value={chunkSize}
+                    onChange={(e) => setChunkSize(e.target.value)}
+                    disabled={isUploading}
+                  />
+                </label>
+                <label className="option-field">
+                  <span>Chunk Overlap</span>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="기본값 사용"
+                    value={chunkOverlap}
+                    onChange={(e) => setChunkOverlap(e.target.value)}
+                    disabled={isUploading}
+                  />
+                </label>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       <div
         {...getRootProps()}
         className={`dropzone ${isDragActive ? 'active' : ''} ${

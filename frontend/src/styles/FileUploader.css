@@ -146,3 +146,70 @@
   color: #e53e3e;
   background-color: #fff5f5;
 }
+
+.upload-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.advanced-options-toggle {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid #e2e8f0;
+  color: #667eea;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.advanced-options-toggle:hover {
+  background-color: #eef2ff;
+  border-color: #667eea;
+}
+
+.advanced-options-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background-color: #f7fafc;
+}
+
+.option-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #4a5568;
+}
+
+.option-field select,
+.option-field input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  color: #2d3748;
+  background-color: white;
+  min-width: 160px;
+}
+
+.option-field select:focus,
+.option-field input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.option-field select:disabled,
+.option-field input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

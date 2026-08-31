@@ -39,6 +39,9 @@ yarn-debug.log*
 htmlcov/
 coverage/
 
+# Worktrees
+.worktrees/
+
 # Storage
 backend/app/storage/uploads/*
 !backend/app/storage/uploads/.gitkeep

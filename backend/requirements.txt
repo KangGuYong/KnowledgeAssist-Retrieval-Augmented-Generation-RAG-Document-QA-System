@@ -6,8 +6,12 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # RAG Pipeline
-langchain==0.1.0
-langchain-community==0.0.10
+# langchain/langchain-community bumped from 0.1.0/0.0.10 to 0.1.20/0.0.38,
+# still within the 0.1.x/0.0.x line. Semantic chunking is a direct port of
+# the "5 Levels of Text Splitting" notebook (app/services/chunking.py) rather
+# than langchain-experimental, so that package isn't a dependency here.
+langchain==0.1.20
+langchain-community==0.0.38
 chromadb==0.4.22
 sentence-transformers==3.3.1
 
