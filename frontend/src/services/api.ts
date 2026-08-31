@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { ChatRequest, ChatResponse, UploadResponse, UploadOptions, DocumentInfo } from '../types/api.types';
+import { ChatRequest, ChatResponse, UploadResponse, UploadOptions, DocumentInfo, ParsedDocumentSummary, ParsedDocumentDetail } from '../types/api.types';
 
 function appendUploadOptions(formData: FormData, options?: UploadOptions): void {
   if (!options) return;
@@ -134,6 +134,22 @@ class ApiService {
    */
   async deleteDocument(documentId: string): Promise<void> {
     await this.client.delete(`/documents/${documentId}`);
+  }
+
+  /**
+   * Get list of MinerU-parsed documents (raw block results)
+   */
+  async getParsedDocuments(): Promise<ParsedDocumentSummary[]> {
+    const response = await this.client.get<ParsedDocumentSummary[]>('/documents/parsed');
+    return response.data;
+  }
+
+  /**
+   * Get one document's raw parsed blocks (page by page)
+   */
+  async getParsedDocument(documentId: string): Promise<ParsedDocumentDetail> {
+    const response = await this.client.get<ParsedDocumentDetail>(`/documents/${documentId}/parsed`);
+    return response.data;
   }
 }
 

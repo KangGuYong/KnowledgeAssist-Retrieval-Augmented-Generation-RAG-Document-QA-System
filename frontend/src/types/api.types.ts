@@ -49,3 +49,26 @@ export interface DocumentInfo {
   num_chunks: number;
   file_size: number;
 }
+
+export interface ParsedBlock {
+  type: string;
+  text?: string;
+  table_body?: string;
+  image_id?: string;
+}
+
+export interface ParsedPage {
+  page_number: number;
+  blocks: ParsedBlock[];
+}
+
+export interface ParsedDocumentSummary {
+  document_id: string;
+  filename: string;
+  created_at: string;
+  page_count: number;
+}
+
+export interface ParsedDocumentDetail extends ParsedDocumentSummary {
+  pages: ParsedPage[];
+}
