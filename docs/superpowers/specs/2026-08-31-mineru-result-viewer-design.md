@@ -242,3 +242,13 @@ class ParsedDocumentDetail(ParsedDocumentSummary):
 - 표/수식은 원본 HTML/LaTeX 그대로 노출되므로, 프론트엔드에서 시각적으로
   "예쁘게" 보이지는 않는다(표는 브라우저 기본 스타일, 수식은 텍스트) — 이는
   의도된 것이다(3절 설계 원칙: 원본 그대로 노출).
+- `_serialize_block`은 `type`/`text`/`table_body`/`image_id`만 옮기고,
+  MinerU `content_list` 블록이 실제로 가질 수 있는 `text_level`(제목 단계),
+  `image_caption`/`image_footnote`, `table_caption`/`table_footnote`(각각
+  [MinerU 파싱 설계 문서](2026-08-31-mineru-pdf-parsing-design.md)의 3.2절
+  표에 문서화됨)는 옮기지 않는다. "원본 그대로 노출"이라는 3절 설계 원칙에
+  비추면 이 필드들도 보여주는 편이 더 충실하겠지만(예: 잘못 파싱된 도표의
+  캡션을 확인할 수 없음), 4개 계층(직렬화/응답 모델/TS 타입/렌더링)에 걸친
+  실제 작업량을 고려해 최초 구현 범위에서는 의도적으로 제외했다(final
+  whole-branch review에서 지적, 2026-08-31). 필요해지면 별도 작업으로
+  다룬다.
