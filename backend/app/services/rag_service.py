@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # 문맥 중 '[이미지 텍스트]'는 OCR로 추출된 것이라 오탈자가 있을 수 있다. 청크
-# 본문에 이미 인라인으로 박혀 있으므로(pdf_ocr._format_ocr_block), 여기서는 LLM에게
+# 본문에 이미 인라인으로 박혀 있으므로(mineru_client._format_ocr_block), 여기서는 LLM에게
 # 그 마커를 어떻게 다뤄야 하는지만 알려준다.
 QA_PROMPT = PromptTemplate(
     template="""다음 문맥을 참고해 질문에 답하라.
