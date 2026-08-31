@@ -63,3 +63,29 @@ class DocumentInfo(BaseModel):
     upload_date: datetime
     num_chunks: int
     file_size: int
+
+
+class ParsedBlock(BaseModel):
+    """MinerU content_list 블록을 원본 그대로 옮긴 것."""
+    type: str
+    text: Optional[str] = None
+    table_body: Optional[str] = None
+    image_id: Optional[str] = None
+
+
+class ParsedPage(BaseModel):
+    page_number: int
+    blocks: list[ParsedBlock]
+
+
+class ParsedDocumentSummary(BaseModel):
+    """파싱 결과 목록 화면에 쓰이는 요약."""
+    document_id: str
+    filename: str
+    created_at: str
+    page_count: int
+
+
+class ParsedDocumentDetail(ParsedDocumentSummary):
+    """파싱 결과 상세 - 페이지별 원본 블록 전체."""
+    pages: list[ParsedPage]

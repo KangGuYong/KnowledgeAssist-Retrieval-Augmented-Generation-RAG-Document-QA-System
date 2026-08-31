@@ -1,12 +1,17 @@
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
 from pathlib import Path
+import json
 import logging
 import re
 import shutil
 from typing import List
 
-from app.api.models.responses import DocumentInfo
+from app.api.models.responses import (
+    DocumentInfo,
+    ParsedDocumentDetail,
+    ParsedDocumentSummary,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -60,6 +65,59 @@ async def get_document_image(document_id: str, image_id: str) -> FileResponse:
     """문서에서 추출된 도표 이미지를 서빙한다."""
     path = resolve_image_path(document_id, image_id, Path(settings.image_storage_dir))
     return FileResponse(path, media_type="image/png")
+
+
+def list_parsed_documents(parsed_dir: Path) -> List[ParsedDocumentSummary]:
+    """parsed_dir의 모든 파싱 결과 파일에서 요약 정보만 읽어 목록으로
+    반환한다. 문서 삭제와 파싱 JSON 삭제는 별개이므로(design doc 4절),
+    parsed_dir에 실제로 존재하는 파일이 곧 목록이다."""
+    if not parsed_dir.is_dir():
+        return []
+
+    summaries = []
+    for path in sorted(parsed_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            summaries.append(
+                ParsedDocumentSummary(
+                    document_id=data["document_id"],
+                    filename=data["filename"],
+                    created_at=data["created_at"],
+                    page_count=data["page_count"],
+                )
+            )
+        except Exception:
+            logger.warning("Skipping unreadable parsed result file: %s", path)
+            continue
+
+    return summaries
+
+
+def load_parsed_document(document_id: str, parsed_dir: Path) -> ParsedDocumentDetail:
+    """document_id의 파싱 결과 상세를 읽는다. document_id는 사용자 입력이
+    파일 경로가 되므로 resolve_image_path와 동일하게 화이트리스트로
+    검증한다."""
+    if not _SAFE_ID.match(document_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parsed result not found")
+
+    path = parsed_dir / f"{document_id}.json"
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parsed result not found")
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return ParsedDocumentDetail(**data)
+
+
+@router.get("/parsed", response_model=List[ParsedDocumentSummary])
+async def get_parsed_documents() -> List[ParsedDocumentSummary]:
+    """MinerU로 파싱된 문서 목록을 반환한다."""
+    return list_parsed_documents(Path(settings.parsed_storage_dir))
+
+
+@router.get("/{document_id}/parsed", response_model=ParsedDocumentDetail)
+async def get_parsed_document(document_id: str) -> ParsedDocumentDetail:
+    """한 문서의 MinerU 원본 파싱 결과(페이지별 블록)를 반환한다."""
+    return load_parsed_document(document_id, Path(settings.parsed_storage_dir))
 
 
 @router.get("/", response_model=List[DocumentInfo])
