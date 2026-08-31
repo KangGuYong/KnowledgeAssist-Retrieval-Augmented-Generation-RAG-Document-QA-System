@@ -237,3 +237,22 @@ def build_pages(
         )
 
     return pages
+
+
+def parse_and_build_pages(
+    file_path: str,
+    ocr: Optional[SupportsImageOcr],
+    image_dir: Optional[Path] = None,
+    client: Optional[MineruClient] = None,
+) -> list:
+    """Parse a PDF via MinerU and assemble it into PdfPage objects.
+
+    ocr=None skips OCR augmentation of image blocks entirely (see
+    build_pages) - the caller (document_processor.load_pdf) decides this
+    based on settings.ocr_enabled.
+    """
+    if client is None:
+        client = MineruClient()
+
+    result = client.parse_pdf(file_path)
+    return build_pages(result.blocks, result.images, ocr, image_dir)

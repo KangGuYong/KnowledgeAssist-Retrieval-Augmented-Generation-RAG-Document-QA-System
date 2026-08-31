@@ -231,3 +231,60 @@ def test_no_image_dir_skips_saving_without_failing():
 
     assert "인식됨" in pages[0].text
     assert pages[0].image_ids == []
+
+
+from app.services.mineru_client import parse_and_build_pages
+
+
+class FakeMineruClient:
+    """Stands in for MineruClient: returns canned blocks instead of calling HTTP."""
+
+    def __init__(self, blocks, images):
+        self.blocks = blocks
+        self.images = images
+
+    def parse_pdf(self, file_path):
+        return MineruResult(blocks=self.blocks, images=self.images)
+
+
+def test_parse_and_build_pages_combines_client_and_page_assembly():
+    images = {"images/img1.png": _png_data_uri()}
+    blocks = [
+        {"type": "text", "page_idx": 0, "text": "본문"},
+        {"type": "image", "page_idx": 0, "img_path": "images/img1.png"},
+    ]
+    client = FakeMineruClient(blocks, images)
+
+    pages = parse_and_build_pages("ignored.pdf", ocr=StubOCR("도표 텍스트"), client=client)
+
+    assert len(pages) == 1
+    assert "본문" in pages[0].text
+    assert "도표 텍스트" in pages[0].text
+
+
+def test_ocr_none_is_forwarded_to_build_pages():
+    images = {"images/img1.png": _png_data_uri()}
+    blocks = [{"type": "image", "page_idx": 0, "img_path": "images/img1.png"}]
+    client = FakeMineruClient(blocks, images)
+
+    pages = parse_and_build_pages("ignored.pdf", ocr=None, client=client)
+
+    assert pages[0].text == ""
+
+
+def test_default_client_is_a_real_mineru_client(monkeypatch):
+    """client=None을 넘기면 실제 MineruClient()를 만든다."""
+    created = {}
+
+    class RecordingClient:
+        def __init__(self):
+            created["called"] = True
+
+        def parse_pdf(self, file_path):
+            return MineruResult(blocks=[], images={})
+
+    monkeypatch.setattr("app.services.mineru_client.MineruClient", RecordingClient)
+
+    parse_and_build_pages("ignored.pdf", ocr=None, client=None)
+
+    assert created.get("called") is True
