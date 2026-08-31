@@ -59,6 +59,22 @@ Handles loading and chunking of PDF, TXT, and DOCX files. PDFs go through the
 OCR pipeline below, so text inside images is chunked and embedded like any
 other text.
 
+Chunking supports two strategies, selectable per upload (`chunking_strategy`
+form field on `POST /api/v1/upload/`, falling back to `CHUNKING_STRATEGY`
+when omitted):
+
+- `default` - `RecursiveCharacterTextSplitter` on a fixed character budget.
+  `chunk_size`/`chunk_overlap` (`CHUNK_SIZE`/`CHUNK_OVERLAP`) can also be
+  overridden per upload; only `default` records them in chunk metadata.
+- `semantic` - groups sentences by embedding-similarity breakpoints (a
+  direct port of the "5 Levels of Text Splitting" notebook's Level 4
+  method, `app/services/chunking.py`), reusing the KURE-v1 embeddings
+  already loaded for retrieval. `SEMANTIC_CHUNKER_BREAKPOINT_PERCENTILE`
+  controls how large a jump in similarity counts as a chunk boundary.
+
+`/api/v1/upload/batch` applies one strategy/size to every file in the
+batch; upload files individually for per-file settings.
+
 ### OCR Service
 
 Wraps PaddleOCR (`korean_PP-OCRv5_mobile_rec` recognition +
@@ -73,6 +89,10 @@ Manages ChromaDB vector database operations.
 ### RAG Service
 
 Orchestrates the retrieval-augmented generation pipeline using LangChain.
+Retrieves the top `RETRIEVAL_K` chunks per question and attaches each one's
+similarity score, so `POST /api/v1/chat/` responses carry a
+`similarity_score` per source the frontend renders as a relevance
+percentage.
 
 ### Parsed Store
 
@@ -110,8 +130,9 @@ it came from. `OCR_ENABLED=False` leaves MinerU's own layout/table/equation
 extraction running but skips this PaddleOCR augmentation step, so figures
 contribute no text.
 
-Chunk metadata carries `ocr_used` and `ocr_image_count` alongside `page`,
-so it is visible which answers came from recognised images.
+Chunk metadata carries `ocr_used`, `ocr_image_count`, and `image_ids`
+alongside `page`, so it is visible which answers came from recognised
+images and which diagrams to cite (below).
 
 MinerU's raw content_list blocks (unfiltered by the OCR/chunking decisions
 above) are also persisted per document under `PARSED_STORAGE_DIR`
@@ -139,6 +160,20 @@ cache. On CPU, expect roughly 2 s per image region.
 
 Set `OCR_DEVICE=gpu` (with `paddlepaddle-gpu` installed instead of
 `paddlepaddle`) to run recognition on CUDA.
+
+## Diagram image citation
+
+Every figure PaddleOCR reads text from is also saved as
+`{IMAGE_STORAGE_DIR}/{document_id}/{image_id}.png` (`image_id` is an md5
+hash of the source bytes, so a repeated logo or header image across pages
+is stored once) and served at
+`GET /api/v1/documents/{document_id}/images/{image_id}`. Chat responses
+carry the matching URLs in each source's `image_urls`, so the frontend can
+show the original diagram next to text an OCR engine may have misread -
+citation is a page-level approximation (every chunk from a page cites every
+image recognised on that page), not an exact per-chunk match. Deleting a
+document (`DELETE /api/v1/documents/{document_id}`) removes its image
+directory along with its vector chunks.
 
 ## Default local model configuration
 

@@ -14,8 +14,11 @@ npm install
 
 ```bash
 cp .env.example .env
-# Edit .env if needed
 ```
+
+`VITE_API_BASE_URL` is empty by default, so requests go through Vite's dev
+proxy (`/api` -> `http://localhost:8000`, no CORS involved). Set it only if
+the backend runs on a different origin.
 
 3. Start development server:
 
@@ -44,7 +47,11 @@ The production build will be in the `dist/` folder.
 
 ### FileUploader
 
-Drag-and-drop file upload component with status indicators.
+Drag-and-drop file upload component with status indicators. An "고급 설정"
+(advanced settings) panel lets you pick the chunking strategy per upload
+(`default` character-based, or `semantic` embedding-similarity based) and,
+for `default`, override the chunk size/overlap - see the backend README's
+Document Processor section for what each strategy does.
 
 ### ChatWindow
 
@@ -56,7 +63,11 @@ Individual message component with markdown support.
 
 ### SourceCitation
 
-Displays source document references with metadata.
+Displays source document references with metadata: a relevance percentage
+(from the response's `similarity_score`), and inline thumbnails for any
+diagrams the answer's text was recognised from (`image_urls`) - click a
+thumbnail to view it full-size, since OCR'd text can misread details the
+original image makes clear.
 
 ### ParsedDocumentViewer
 
