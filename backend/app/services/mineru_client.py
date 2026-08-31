@@ -300,15 +300,21 @@ def parse_and_build_pages(
     ocr: Optional[SupportsImageOcr],
     image_dir: Optional[Path] = None,
     client: Optional[MineruClient] = None,
+    on_parsed: Optional[Callable[["MineruResult"], None]] = None,
 ) -> list:
     """Parse a PDF via MinerU and assemble it into PdfPage objects.
 
     ocr=None skips OCR augmentation of image blocks entirely (see
     build_pages) - the caller (document_processor.load_pdf) decides this
-    based on settings.ocr_enabled.
+    based on settings.ocr_enabled. on_parsed, if given, is called with the
+    raw MineruResult right after parsing succeeds and before build_pages()
+    consumes it - this is the only point callers can access the untouched
+    blocks (used by parsed_store.save() for the parsed-result viewer).
     """
     if client is None:
         client = MineruClient()
 
     result = client.parse_pdf(file_path)
+    if on_parsed is not None:
+        on_parsed(result)
     return build_pages(result.blocks, result.images, ocr, image_dir)
