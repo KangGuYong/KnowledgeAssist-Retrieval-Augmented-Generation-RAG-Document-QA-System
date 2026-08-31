@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     mineru_enabled: bool = True
     mineru_lang_list: list[str] = ["korean"]  # passed verbatim as /file_parse's lang_list form field
 
+    # Parsed-result viewer: raw MinerU content_list blocks, saved alongside images
+    parsed_storage_dir: str = "app/storage/parsed"
+
     # RAG Configuration
     chunk_size: int = 1000
     chunk_overlap: int = 200

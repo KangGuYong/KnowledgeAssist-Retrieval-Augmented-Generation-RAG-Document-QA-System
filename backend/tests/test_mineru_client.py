@@ -403,3 +403,98 @@ def test_equation_block_with_empty_text_falls_back_to_ocr():
 
     assert "[이미지 텍스트]\n수식 이미지에서 읽은 텍스트" in pages[0].text
     assert pages[0].ocr_image_count == 1
+
+
+from app.services.mineru_client import persist_block_image
+
+
+def test_persist_block_image_saves_and_returns_content_addressed_id(tmp_path):
+    import hashlib
+
+    data_uri = _png_data_uri()
+    raw = _decode_data_uri_for_test(data_uri)
+    expected_id = hashlib.md5(raw).hexdigest()[:16]
+    block = {"type": "image", "page_idx": 0, "img_path": "images/fig1.png"}
+    images = {"images/fig1.png": data_uri}
+    image_dir = tmp_path / "saved"
+
+    result = persist_block_image(block, images, image_dir)
+
+    assert result == expected_id
+    assert (image_dir / f"{expected_id}.png").exists()
+
+
+def _decode_data_uri_for_test(data_uri: str) -> bytes:
+    import base64
+
+    _, encoded = data_uri.split(",", 1)
+    return base64.b64decode(encoded)
+
+
+def test_persist_block_image_returns_none_when_no_img_path(tmp_path):
+    block = {"type": "text", "page_idx": 0, "text": "본문"}
+
+    result = persist_block_image(block, images={}, image_dir=tmp_path / "saved")
+
+    assert result is None
+
+
+def test_persist_block_image_returns_none_when_images_dict_missing_key(tmp_path):
+    block = {"type": "image", "page_idx": 0, "img_path": "images/missing.png"}
+
+    result = persist_block_image(block, images={}, image_dir=tmp_path / "saved")
+
+    assert result is None
+
+
+def test_persist_block_image_returns_none_when_image_data_is_corrupted(tmp_path):
+    import base64
+
+    block = {"type": "image", "page_idx": 0, "img_path": "images/corrupt.png"}
+    corrupted_uri = "data:image/png;base64," + base64.b64encode(b"not a real png").decode()
+    images = {"images/corrupt.png": corrupted_uri}
+
+    result = persist_block_image(block, images, tmp_path / "saved")
+
+    assert result is None
+
+
+def test_on_parsed_callback_receives_raw_result_before_build_pages_consumes_it():
+    images = {"images/img1.png": _png_data_uri()}
+    blocks = [{"type": "text", "page_idx": 0, "text": "본문"}]
+    client = FakeMineruClient(blocks, images)
+    received = []
+
+    parse_and_build_pages(
+        "ignored.pdf", ocr=None, client=client, on_parsed=lambda result: received.append(result)
+    )
+
+    assert len(received) == 1
+    assert received[0].blocks == blocks
+    assert received[0].images == images
+
+
+def test_on_parsed_defaults_to_none_and_is_optional():
+    images = {"images/img1.png": _png_data_uri()}
+    blocks = [{"type": "text", "page_idx": 0, "text": "본문"}]
+    client = FakeMineruClient(blocks, images)
+
+    pages = parse_and_build_pages("ignored.pdf", ocr=None, client=client)
+
+    assert pages[0].text == "본문"
+
+
+def test_on_parsed_callback_exception_does_not_break_parsing():
+    images = {"images/img1.png": _png_data_uri()}
+    blocks = [{"type": "text", "page_idx": 0, "text": "본문"}]
+    client = FakeMineruClient(blocks, images)
+
+    def failing_callback(result):
+        raise ValueError("callback error")
+
+    pages = parse_and_build_pages(
+        "ignored.pdf", ocr=None, client=client, on_parsed=failing_callback
+    )
+
+    assert len(pages) == 1
+    assert pages[0].text == "본문"

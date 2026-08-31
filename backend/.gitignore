@@ -21,6 +21,8 @@ app/storage/chroma_db/*
 !app/storage/chroma_db/.gitkeep
 app/storage/images/*
 !app/storage/images/.gitkeep
+app/storage/parsed/*
+!app/storage/parsed/.gitkeep
 
 # IDE
 .vscode/

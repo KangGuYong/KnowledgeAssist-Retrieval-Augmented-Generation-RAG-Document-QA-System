@@ -13,7 +13,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 import httpx
 
@@ -160,6 +160,26 @@ def _bgr_array_from_bytes(raw: bytes) -> Any:
     return rgb[:, :, ::-1]
 
 
+def persist_block_image(block: dict, images: dict, image_dir: Path) -> Optional[str]:
+    """블록의 img_path 이미지를 image_dir에 저장한다. build_pages()의 OCR
+    필요 여부(_needs_ocr) 판단과 무관하게, img_path가 있는 모든 블록에
+    무조건 적용된다 - 파싱 결과 뷰어는 OCR 대상 여부와 상관없이 블록이
+    실제로 가진 이미지를 그대로 보여줘야 하기 때문이다. build_pages()가
+    쓰는 것과 동일한 content-addressed image_id 스킴(md5 hexdigest[:16])을
+    써서 기존 /documents/{id}/images/{image_id} 서빙 엔드포인트를 그대로
+    쓸 수 있게 한다."""
+    img_path = block.get("img_path")
+    if not img_path:
+        return None
+    try:
+        raw = _decode_data_uri(_lookup_image(images, img_path))
+        image = _bgr_array_from_bytes(raw)
+    except Exception:
+        return None
+    image_id = hashlib.md5(raw).hexdigest()[:16]
+    return image_id if _save_image(image, image_dir, image_id) else None
+
+
 def _text_of(block: dict) -> str:
     if block.get("type") == "table":
         return (block.get("table_body") or "").strip()
@@ -280,15 +300,24 @@ def parse_and_build_pages(
     ocr: Optional[SupportsImageOcr],
     image_dir: Optional[Path] = None,
     client: Optional[MineruClient] = None,
+    on_parsed: Optional[Callable[["MineruResult"], None]] = None,
 ) -> list:
     """Parse a PDF via MinerU and assemble it into PdfPage objects.
 
     ocr=None skips OCR augmentation of image blocks entirely (see
     build_pages) - the caller (document_processor.load_pdf) decides this
-    based on settings.ocr_enabled.
+    based on settings.ocr_enabled. on_parsed, if given, is called with the
+    raw MineruResult right after parsing succeeds and before build_pages()
+    consumes it - this is the only point callers can access the untouched
+    blocks (used by parsed_store.save() for the parsed-result viewer).
     """
     if client is None:
         client = MineruClient()
 
     result = client.parse_pdf(file_path)
+    if on_parsed is not None:
+        try:
+            on_parsed(result)
+        except Exception as e:
+            logger.warning("on_parsed callback failed: %s", e)
     return build_pages(result.blocks, result.images, ocr, image_dir)

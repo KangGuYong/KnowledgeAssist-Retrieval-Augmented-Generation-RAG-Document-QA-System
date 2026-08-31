@@ -57,3 +57,31 @@
     grid-template-columns: 1fr;
   }
 }
+
+.app-tabs {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.app-tab {
+  padding: 0.5rem 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 999px;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.app-tab.active {
+  background: white;
+  color: #667eea;
+  font-weight: 600;
+}
+
+.app-main-full {
+  grid-column: 1 / -1;
+  min-height: 0;
+}

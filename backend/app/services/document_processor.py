@@ -11,6 +11,7 @@ from typing import Optional
 from app.config import get_settings
 from app.services.chunking import build_splitter
 from app.services.mineru_client import PdfPage, parse_and_build_pages
+from app.services import parsed_store
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -41,9 +42,9 @@ class DocumentProcessor:
         Args:
             file_path: Path to the PDF
             filename: Original filename
-            document_id: Document ID; required to persist extracted images.
-                Without it, text extraction proceeds unchanged and no images
-                are saved.
+            document_id: Document ID; required to persist extracted images
+                and the parsed-result JSON (see parsed_store.save). Without
+                it, text extraction proceeds unchanged and neither is saved.
 
         Returns:
             List of Document objects, one per page
@@ -61,9 +62,13 @@ class DocumentProcessor:
 
                 ocr = get_ocr_service()
 
+        on_parsed = None
+        if document_id:
+            on_parsed = lambda result: parsed_store.save(document_id, filename, result, image_dir)
+
         try:
             pages: list[PdfPage] = parse_and_build_pages(
-                file_path, ocr=ocr, image_dir=image_dir, client=self.mineru_client
+                file_path, ocr=ocr, image_dir=image_dir, client=self.mineru_client, on_parsed=on_parsed
             )
         except Exception as e:
             logger.warning(

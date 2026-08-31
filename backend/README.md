@@ -74,6 +74,12 @@ Manages ChromaDB vector database operations.
 
 Orchestrates the retrieval-augmented generation pipeline using LangChain.
 
+### Parsed Store
+
+Persists MinerU's raw parsed blocks per document (page by page) for the
+parsed-result viewer, separately from the chunks that go into the vector
+store. See the parsed-result viewer endpoints below.
+
 ## PDF parsing (MinerU + PaddleOCR)
 
 PDF layout, table, and equation extraction is delegated to
@@ -106,6 +112,13 @@ contribute no text.
 
 Chunk metadata carries `ocr_used` and `ocr_image_count` alongside `page`,
 so it is visible which answers came from recognised images.
+
+MinerU's raw content_list blocks (unfiltered by the OCR/chunking decisions
+above) are also persisted per document under `PARSED_STORAGE_DIR`
+(`app/storage/parsed` by default), one JSON file per document, and served
+via `GET /api/v1/documents/parsed` (list) and
+`GET /api/v1/documents/{document_id}/parsed` (one document's pages/blocks)
+for the parsed-result viewer.
 
 OCR runs in a **separate process**. `paddlex` imports `modelscope`, which
 imports `torch`, and Paddle's inference predictor segfaults in a process
