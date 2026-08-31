@@ -58,6 +58,11 @@ Individual message component with markdown support.
 
 Displays source document references with metadata.
 
+### ParsedDocumentViewer
+
+Renders MinerU's raw parsed blocks (page by page) for a selected document,
+reachable via the "문서 뷰어" tab.
+
 ## Development
 
 Type checking:
