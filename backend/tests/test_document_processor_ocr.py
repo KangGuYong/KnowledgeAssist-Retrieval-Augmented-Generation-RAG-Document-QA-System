@@ -139,8 +139,10 @@ def test_image_ids_are_carried_onto_every_chunk_from_that_page(tmp_path, monkeyp
     """청크-이미지 연결은 페이지 단위 근사다(설계 문서 3.1절, 2026-08-28):
     그 페이지에서 나온 모든 청크가 그 페이지의 이미지 전부를 인용한다."""
     from app.services import document_processor as module
+    from app.services import parsed_store as parsed_store_module
 
     monkeypatch.setattr(module.settings, "image_storage_dir", str(tmp_path / "images_out"))
+    monkeypatch.setattr(parsed_store_module.settings, "parsed_storage_dir", str(tmp_path / "parsed_out"))
     processor = DocumentProcessor(
         ocr=StubOCR("그림 안의 설명 문장"), mineru_client=_client_with_text_and_image(tmp_path)
     )
