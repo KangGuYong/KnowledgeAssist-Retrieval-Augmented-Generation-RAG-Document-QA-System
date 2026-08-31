@@ -10,7 +10,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.services.chunking import build_splitter
-from app.services.pdf_ocr import PdfPage, extract_pages
+from app.services.mineru_client import PdfPage, parse_and_build_pages
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -19,9 +19,11 @@ settings = get_settings()
 class DocumentProcessor:
     """Process and chunk documents."""
 
-    def __init__(self, ocr=None):
+    def __init__(self, ocr=None, mineru_client=None):
         # Defaults to the shared PaddleOCR service; injectable for tests.
         self.ocr = ocr
+        # Defaults to a real MineruClient(); injectable for tests.
+        self.mineru_client = mineru_client
 
     def load_pdf(
         self,
@@ -30,10 +32,11 @@ class DocumentProcessor:
         document_id: Optional[str] = None,
     ) -> list[Document]:
         """
-        Load a PDF, replacing image regions with their OCR text.
+        Load a PDF via MinerU, augmenting image blocks with PaddleOCR text.
 
-        Falls back to plain text extraction if OCR is disabled or unavailable,
-        so an upload never fails just because PaddleOCR could not run.
+        Falls back to plain text extraction if MinerU is disabled or
+        unavailable, so an upload never fails just because the parsing
+        service could not run.
 
         Args:
             file_path: Path to the PDF
@@ -45,16 +48,26 @@ class DocumentProcessor:
         Returns:
             List of Document objects, one per page
         """
-        if not settings.ocr_enabled:
+        if not settings.mineru_enabled:
             return PyPDFLoader(file_path).load()
 
         image_dir = Path(settings.image_storage_dir) / document_id if document_id else None
 
+        ocr = None
+        if settings.ocr_enabled:
+            ocr = self.ocr
+            if ocr is None:
+                from app.services.ocr_service import get_ocr_service
+
+                ocr = get_ocr_service()
+
         try:
-            pages: list[PdfPage] = extract_pages(file_path, ocr=self.ocr, image_dir=image_dir)
+            pages: list[PdfPage] = parse_and_build_pages(
+                file_path, ocr=ocr, image_dir=image_dir, client=self.mineru_client
+            )
         except Exception as e:
             logger.warning(
-                f"OCR extraction failed for {filename} ({e}); "
+                f"MinerU extraction failed for {filename} ({e}); "
                 "falling back to text-only extraction"
             )
             return PyPDFLoader(file_path).load()
@@ -74,7 +87,7 @@ class DocumentProcessor:
                         "full_page_ocr": page.full_page_ocr,
                         # Chroma metadata values must be str/int/float/bool, so a
                         # list can't be stored directly; image ids never contain
-                        # commas (see documents._SAFE_ID), so joining is lossless.
+                        # commas (md5 hexdigest), so joining is lossless.
                         "image_ids": ",".join(page.image_ids),
                     },
                 )
