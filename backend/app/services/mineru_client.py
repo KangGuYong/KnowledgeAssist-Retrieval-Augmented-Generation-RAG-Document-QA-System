@@ -8,15 +8,18 @@ inline rather than exposing a shared output directory, verified 2026-08-31).
 Page-grouping and text assembly live in build_pages() (added in the next task).
 """
 
+import hashlib
 import json
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Protocol
 
 import httpx
 
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
@@ -80,3 +83,157 @@ class MineruClient:
             blocks=json.loads(entry["content_list"]),
             images=entry["images"],
         )
+
+
+class SupportsImageOcr(Protocol):
+    """Minimal interface required from an OCR backend."""
+
+    def image_to_text(self, image: Any) -> str:  # pragma: no cover - protocol
+        ...
+
+
+@dataclass
+class PdfPage:
+    """One page assembled from MinerU's content_list blocks."""
+
+    page_number: int  # 1-based
+    text: str
+    image_count: int = 0
+    ocr_image_count: int = 0
+    full_page_ocr: bool = False  # unused on the MinerU path; MinerU decides scanned-vs-not internally
+    image_ids: list = field(default_factory=list)
+
+
+def _format_ocr_block(text: str) -> str:
+    """Wrap OCR output so retrieved chunks show where the text came from."""
+    prefix = settings.ocr_block_prefix.strip()
+    if not prefix:
+        return text
+    return f"{prefix}\n{text}"
+
+
+def _save_image(image: Any, image_dir: Path, image_id: str) -> bool:
+    """Persist a BGR numpy array as PNG. Never raises; returns False on failure."""
+    try:
+        from PIL import Image as PILImage
+
+        image_dir.mkdir(parents=True, exist_ok=True)
+        rgb = image[:, :, ::-1]  # BGR -> RGB
+        PILImage.fromarray(rgb).save(image_dir / f"{image_id}.png", format="PNG")
+        return True
+    except Exception as e:
+        logger.warning("Failed to save extracted image %s: %s", image_id, e)
+        return False
+
+
+def _decode_data_uri(data_uri: str) -> bytes:
+    """Decode a 'data:image/...;base64,....' URI into raw image bytes."""
+    import base64
+
+    _, encoded = data_uri.split(",", 1)
+    return base64.b64decode(encoded)
+
+
+def _bgr_array_from_bytes(raw: bytes) -> Any:
+    """Decode image bytes into a BGR numpy array (matches PaddleOCR's expected order)."""
+    import io
+
+    import numpy as np
+    from PIL import Image as PILImage
+
+    rgb = np.array(PILImage.open(io.BytesIO(raw)).convert("RGB"))
+    return rgb[:, :, ::-1]
+
+
+def _text_of(block: dict) -> str:
+    if block.get("type") == "table":
+        return (block.get("table_body") or "").strip()
+    return (block.get("text") or "").strip()
+
+
+def _ocr_image_block(
+    block: dict,
+    images: dict,
+    ocr: SupportsImageOcr,
+    cache: dict,
+    image_dir: Optional[Path],
+) -> tuple:
+    """OCR one image block, reusing results for repeated image bytes.
+
+    The image is saved whenever image_dir is given, even if OCR finds no
+    text - only the citation (image_id surfaced to the caller) is gated on
+    recognised text, matching the file-saving contract PaddleOCR splicing
+    already used for embedded PDF images.
+    """
+    raw = _decode_data_uri(images[block["img_path"]])
+    key = hashlib.md5(raw).hexdigest()[:16]
+
+    if key in cache:
+        return cache[key]
+
+    image = _bgr_array_from_bytes(raw)
+    text = (ocr.image_to_text(image) or "").strip()
+
+    image_id = None
+    if image_dir is not None and _save_image(image, image_dir, key):
+        image_id = key
+
+    result = (text, image_id)
+    cache[key] = result
+    return result
+
+
+def build_pages(
+    blocks: list,
+    images: dict,
+    ocr: Optional[SupportsImageOcr],
+    image_dir: Optional[Path] = None,
+) -> list:
+    """Group content_list blocks by page and assemble each page's PdfPage.
+
+    Blocks arrive in MinerU's reading order already - this only groups by
+    page_idx, it does not re-sort within a page. images maps each image
+    block's img_path to a base64 data URI (MinerU's /file_parse response
+    shape - see MineruResult). ocr=None (settings.ocr_enabled is False)
+    skips OCR augmentation of image blocks entirely: they contribute no
+    text and no citation.
+    """
+    by_page: dict = {}
+    for block in blocks:
+        by_page.setdefault(block["page_idx"], []).append(block)
+
+    cache: dict = {}
+    pages = []
+    for page_idx in sorted(by_page):
+        page_blocks = by_page[page_idx]
+        parts = []
+        ocr_image_count = 0
+        image_ids = []
+
+        for block in page_blocks:
+            if block.get("type") == "image":
+                if ocr is None:
+                    continue
+                text, image_id = _ocr_image_block(block, images, ocr, cache, image_dir)
+                if not text:
+                    continue
+                ocr_image_count += 1
+                if image_id is not None:
+                    image_ids.append(image_id)
+                parts.append(_format_ocr_block(text))
+            else:
+                text = _text_of(block)
+                if text:
+                    parts.append(text)
+
+        pages.append(
+            PdfPage(
+                page_number=page_idx + 1,
+                text="\n\n".join(parts),
+                image_count=sum(1 for b in page_blocks if b.get("type") == "image"),
+                ocr_image_count=ocr_image_count,
+                image_ids=image_ids,
+            )
+        )
+
+    return pages
