@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { FileText } from 'lucide-react';
+import { FileText, Trash2 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { ParsedBlock, ParsedDocumentDetail, ParsedDocumentSummary } from '../types/api.types';
 import '../styles/ParsedDocumentViewer.css';
@@ -69,6 +69,7 @@ export const ParsedDocumentViewer: React.FC = () => {
   const [detail, setDetail] = useState<ParsedDocumentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     apiService
@@ -76,6 +77,24 @@ export const ParsedDocumentViewer: React.FC = () => {
       .then(setDocuments)
       .catch((err: Error) => setError(err.message));
   }, []);
+
+  const handleDelete = async (e: React.MouseEvent, documentId: string, filename: string) => {
+    e.stopPropagation();
+    if (!window.confirm(`"${filename}" 문서를 삭제할까요? 되돌릴 수 없습니다.`)) return;
+
+    setDeletingId(documentId);
+    try {
+      await apiService.deleteDocument(documentId);
+      setDocuments((prev) => prev.filter((doc) => doc.document_id !== documentId));
+      if (selectedId === documentId) {
+        setSelectedId(null);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     if (!selectedId) {
@@ -98,14 +117,22 @@ export const ParsedDocumentViewer: React.FC = () => {
         {documents.length === 0 && <p className="parsed-viewer-empty">아직 파싱된 문서가 없습니다.</p>}
         <ul>
           {documents.map((doc) => (
-            <li key={doc.document_id}>
-              <button
-                className={doc.document_id === selectedId ? 'parsed-doc-item active' : 'parsed-doc-item'}
-                onClick={() => setSelectedId(doc.document_id)}
-              >
+            <li
+              key={doc.document_id}
+              className={doc.document_id === selectedId ? 'parsed-doc-item active' : 'parsed-doc-item'}
+            >
+              <button className="parsed-doc-select" onClick={() => setSelectedId(doc.document_id)}>
                 <FileText size={14} />
                 <span className="parsed-doc-filename">{doc.filename}</span>
                 <span className="parsed-doc-pages">{doc.page_count}p</span>
+              </button>
+              <button
+                className="parsed-doc-delete"
+                onClick={(e) => handleDelete(e, doc.document_id, doc.filename)}
+                disabled={deletingId === doc.document_id}
+                title="문서 삭제"
+              >
+                <Trash2 size={14} />
               </button>
             </li>
           ))}

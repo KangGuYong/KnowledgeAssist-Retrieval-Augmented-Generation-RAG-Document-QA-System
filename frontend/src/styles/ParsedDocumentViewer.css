@@ -31,20 +31,32 @@
 .parsed-doc-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
   width: 100%;
-  padding: 0.5rem 0.75rem;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
   background: white;
-  cursor: pointer;
-  text-align: left;
   font-size: 0.9rem;
 }
 
 .parsed-doc-item.active {
   border-color: #667eea;
   background: #f0f1fd;
+}
+
+.parsed-doc-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
 }
 
 .parsed-doc-filename {
@@ -57,6 +69,29 @@
 .parsed-doc-pages {
   color: #888;
   font-size: 0.8rem;
+}
+
+.parsed-doc-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
+  margin-right: 0.4rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #c0392b;
+  cursor: pointer;
+}
+
+.parsed-doc-delete:hover {
+  background: #fdecea;
+}
+
+.parsed-doc-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .parsed-viewer-content {

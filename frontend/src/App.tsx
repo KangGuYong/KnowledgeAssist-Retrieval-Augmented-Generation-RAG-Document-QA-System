@@ -36,20 +36,15 @@ function App() {
       </header>
 
       <main className="app-main">
-        {activeTab === 'chat' ? (
-          <>
-            <div className="sidebar">
-              <FileUploader onUploadComplete={handleUploadComplete} />
-            </div>
-            <div className="chat-section">
-              <ChatWindow documentIds={uploadedDocumentIds} />
-            </div>
-          </>
-        ) : (
-          <div className="app-main-full">
-            <ParsedDocumentViewer />
-          </div>
-        )}
+        <div className="sidebar" hidden={activeTab !== 'chat'}>
+          <FileUploader onUploadComplete={handleUploadComplete} />
+        </div>
+        <div className="chat-section" hidden={activeTab !== 'chat'}>
+          <ChatWindow documentIds={uploadedDocumentIds} />
+        </div>
+        <div className="app-main-full" hidden={activeTab !== 'viewer'}>
+          <ParsedDocumentViewer />
+        </div>
       </main>
     </div>
   );
