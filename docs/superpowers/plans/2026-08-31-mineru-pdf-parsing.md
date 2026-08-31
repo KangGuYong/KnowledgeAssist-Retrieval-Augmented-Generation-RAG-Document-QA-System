@@ -19,45 +19,68 @@
 - 이미지 인용 스킴은 그대로 유지한다: `image_id = md5(원본 바이트).hexdigest()[:16]`, 저장 경로 `{image_storage_dir}/{document_id}/{image_id}.png`, `documents.py`의 `_SAFE_ID = re.compile(r"^[A-Za-z0-9_]+$")` 화이트리스트와 호환되어야 한다(md5 hexdigest는 항상 이 정규식을 통과한다).
 - OCR 라벨 마커는 `settings.ocr_block_prefix`(`"[이미지 텍스트]"`)를 그대로 재사용한다 — 새 마커를 만들지 않는다.
 - `document_processor.py`, `chunking.py`, `rag_service.py`, `app/api/routes/documents.py`, `app/api/models/responses.py`는 이 계획에서 **document_processor.py의 import/load_pdf 두 곳 외에는 수정하지 않는다** — 스펙 2절의 "기존 하위 파이프라인 무변경" 원칙.
-- 새 설정(`mineru_base_url`, `mineru_timeout`, `mineru_enabled`)과 제거 대상 설정(`ocr_dpi`, `ocr_min_image_size`, `ocr_max_images_per_page`, `ocr_page_text_threshold`, `ocr_row_tolerance`, `ocr_layout_order`)은 스펙 3.6절 표와 정확히 일치해야 한다.
+- 새 설정(`mineru_base_url`, `mineru_timeout`, `mineru_enabled`, `mineru_lang_list`)과 제거 대상 설정(`ocr_dpi`, `ocr_min_image_size`, `ocr_max_images_per_page`, `ocr_page_text_threshold`, `ocr_row_tolerance`, `ocr_layout_order`)은 스펙 3.6절 표와 정확히 일치해야 한다.
+- **MinerU `/file_parse`의 실제 응답 형태(2026-08-31, 설치된 MinerU 3.4.5로 실측 확인, 스펙 3.2절)**: 요청 파일 필드명은 `files`(복수형, 단일 파일도 이 이름). `backend` 폼 필드는 기본값이 `hybrid-engine`(VLM 필요)이라 **반드시 `pipeline`을 명시**해야 한다. `return_content_list=true`/`return_images=true`도 기본값이 `false`라 명시적으로 켜야 한다. 응답은 `{"status", "error", "file_names": [...], "results": {<file_stem>: {"content_list": "<JSON 문자열>", "images": {img_path: "data:image/...;base64,..."}}}}` 형태의 작업 봉투다 — `content_list`는 블록 배열이 아니라 그 배열을 담은 **JSON 문자열**이라 한 번 더 파싱해야 하고, `images`는 파일 경로가 아니라 **base64 데이터 URI 딕셔너리**다. `/file_parse`는 동기 엔드포인트라 폴링은 불필요하다.
 
 ---
 
-## Task 1: MinerU 서비스 기동 (운영 작업, 커밋 없음)
+## Task 1: MinerU 서비스 기동 (운영 작업, 커밋 없음) — 완료, 실측값으로 갱신됨
 
-이 태스크는 이 저장소에 코드를 추가하지 않는다 — Task 2 이후의 수동 스모크 테스트(Task 8)와, 실제 서비스의 응답 필드명을 확인하기 위한 사전 준비다.
+이 태스크는 이 저장소에 코드를 추가하지 않는다. **2026-08-31에 실행 완료** —
+아래는 실제로 사용된 명령과 실측 결과다(재현/재기동 시 그대로 사용 가능).
 
 **Files:** 없음 (운영 절차)
 
-- [ ] **Step 1: MinerU를 별도 환경에 설치**
+- [x] **Step 1: MinerU를 별도 환경에 설치**
 
 ```bash
 python3 -m venv ~/mineru-venv
+~/mineru-venv/bin/pip install -U pip
 ~/mineru-venv/bin/pip install -U "mineru[core]"
 ```
 
-(백엔드 venv `backend/app/venv`와 절대 섞지 않는다 — Global Constraints 참고.)
+설치됨: `mineru==3.4.5` (torch 2.13.0, CUDA 13 계열 의존성 포함). 백엔드 venv
+`backend/app/venv`와 섞지 않았다 — Global Constraints 참고.
 
-- [ ] **Step 2: API 서버 기동**
+- [ ] **Step 2: API 서버 기동** (세션 종료 시 죽는 `nohup` 백그라운드 프로세스이므로, 새 세션에서 재실행 시 다시 필요)
 
 ```bash
-~/mineru-venv/bin/mineru-api --host 0.0.0.0 --port 8100
+nohup ~/mineru-venv/bin/mineru-api --host 0.0.0.0 --port 8100 > ~/mineru-api.log 2>&1 &
+disown
+sleep 5 && curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8100/docs
 ```
 
-- [ ] **Step 3: 샘플 PDF로 `/file_parse` 응답 형태 확인**
+Expected: `200`
+
+- [x] **Step 3: 샘플 PDF로 `/file_parse` 응답 형태 확인 — 실측 완료**
+
+실제 요청(필드명 `files`, 반드시 `backend=pipeline` 명시 — 기본값은
+`hybrid-engine`이라 로컬 VLM을 요구한다):
 
 ```bash
 curl -s -X POST http://127.0.0.1:8100/file_parse \
-  -F "file=@/path/to/sample.pdf" | python3 -m json.tool | head -60
+  -F "files=@/tmp/sample.pdf" \
+  -F "backend=pipeline" \
+  -F "lang_list=korean" \
+  -F "return_content_list=true" \
+  -F "return_images=true" \
+  -F "return_md=false" \
+  -o /tmp/mineru_response.json -w "HTTP %{http_code}\n" --max-time 180
 ```
 
-응답 JSON에서 다음을 확인하고 실제 필드명이 Task 2의 코드와 다르면 Task 2 Step 3에서 `payload["content_list"]`/`payload["output_dir"]` 키 이름을 실측값으로 맞춘다:
-- content_list 블록 배열이 담긴 최상위 키 이름
-- 블록이 참조하는 이미지 파일(`img_path`)을 백엔드가 로컬 파일시스템에서 직접 열 수 있는 경로인지(스펙 3.2절 "가정" 참고 — 같은 호스트라 가정)
+**실측 결과**(Global Constraints에도 요약됨, 전체 근거는 스펙 3.2절):
+응답은 `{"status": "completed", "error": null, "file_names": ["sample"],
+"results": {"sample": {"content_list": "<JSON 문자열>", "images":
+{<img_path>: "data:image/jpeg;base64,..."}}}}` 형태. `content_list`는
+`json.loads()`가 한 번 더 필요한 문자열이고, `images`는 파일 경로가
+아니라 base64 데이터 URI 딕셔너리다 — 최초 설계가 가정했던 "같은 호스트
+파일시스템 공유"는 필요 없다. Task 2/3의 코드는 이 실측값을 반영해 이미
+작성되어 있다.
 
-- [ ] **Step 4: `curl http://127.0.0.1:8100/docs`로 Swagger UI가 뜨는지 확인**
+- [x] **Step 4: `curl http://127.0.0.1:8100/docs`로 Swagger UI가 뜨는지 확인 — `200` 확인됨**
 
-이후 태스크의 수동 스모크 테스트(Task 8)에서 이 서비스가 계속 떠 있어야 한다.
+이후 태스크의 수동 스모크 테스트(Task 7)에서 이 서비스가 계속 떠 있어야
+한다. 현재 이 세션에서 `nohup`으로 띄운 프로세스가 살아 있다(포트 8100).
 
 ---
 
@@ -68,16 +91,19 @@ curl -s -X POST http://127.0.0.1:8100/file_parse \
 - Test: Create `backend/tests/test_mineru_client.py`
 
 **Interfaces:**
-- Produces: `MineruClient(base_url=None, timeout=None, transport=None)`, `.parse_pdf(file_path: str) -> MineruResult`; `MineruResult(blocks: list[dict], output_dir: Path)` — 이후 태스크가 그대로 사용.
+- Produces: `MineruClient(base_url=None, timeout=None, lang_list=None, transport=None)`, `.parse_pdf(file_path: str) -> MineruResult`; `MineruResult(blocks: list[dict], images: dict[str, str])` (`images`는 `img_path -> "data:image/...;base64,..."` 딕셔너리) — 이후 태스크가 그대로 사용.
+
+이 태스크의 요청/응답 형태는 Task 1에서 설치된 실제 MinerU 3.4.5 서비스로
+실측 확인된 것이다(스펙 3.2절, Global Constraints) — 추측이 아니다.
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
 ```python
 """MineruClient talks to the self-hosted MinerU HTTP service and returns
-content_list.json blocks plus where their referenced images live on disk.
+content_list.json blocks plus their referenced images as base64 data URIs.
 """
 
-from pathlib import Path
+import json
 
 import httpx
 import pytest
@@ -85,28 +111,43 @@ import pytest
 from app.services.mineru_client import MineruClient, MineruResult
 
 
-def _handler(blocks, output_dir="/tmp/mineru-out/doc1"):
-    def handle(request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
-        assert request.url.path == "/file_parse"
-        assert b'name="file"' in request.content
-        return httpx.Response(200, json={"content_list": blocks, "output_dir": output_dir})
+def _task_envelope(blocks, images=None, file_stem="sample", status="completed", error=None):
+    return {
+        "status": status,
+        "error": error,
+        "file_names": [file_stem],
+        "results": {
+            file_stem: {
+                "content_list": json.dumps(blocks),
+                "images": images or {},
+            }
+        },
+    }
 
-    return handle
 
-
-def test_parse_pdf_posts_the_file_and_returns_blocks(tmp_path):
+def test_parse_pdf_posts_the_file_with_pipeline_backend_and_returns_blocks(tmp_path):
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 fake content")
     blocks = [{"type": "text", "page_idx": 0, "text": "hello"}]
-    transport = httpx.MockTransport(_handler(blocks))
+    images = {"images/img1.jpg": "data:image/jpeg;base64,Zm9v"}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/file_parse"
+        # multipart field name is "files" (plural) - MinerU 3.4.5's actual schema
+        assert b'name="files"' in request.content
+        assert b'name="backend"' in request.content
+        assert b"pipeline" in request.content
+        return httpx.Response(200, json=_task_envelope(blocks, images))
+
+    transport = httpx.MockTransport(handle)
     client = MineruClient(base_url="http://mineru.local", transport=transport)
 
     result = client.parse_pdf(str(pdf_path))
 
     assert isinstance(result, MineruResult)
     assert result.blocks == blocks
-    assert result.output_dir == Path("/tmp/mineru-out/doc1")
+    assert result.images == images
 
 
 def test_parse_pdf_raises_on_http_error(tmp_path):
@@ -122,7 +163,24 @@ def test_parse_pdf_raises_on_http_error(tmp_path):
         client.parse_pdf(str(pdf_path))
 
 
-def test_base_url_and_timeout_default_to_settings():
+def test_parse_pdf_raises_when_task_status_is_not_completed(tmp_path):
+    """HTTP 200이어도 status/error가 실패를 나타낼 수 있다 (실측: 지원하지 않는
+    파일 형식은 400을 주지만, 파싱 자체 실패는 200 + status="failed"로 올 수 있다)."""
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake content")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_task_envelope([], status="failed", error="parsing crashed")
+        )
+
+    client = MineruClient(base_url="http://mineru.local", transport=httpx.MockTransport(handle))
+
+    with pytest.raises(RuntimeError, match="parsing crashed"):
+        client.parse_pdf(str(pdf_path))
+
+
+def test_base_url_timeout_and_lang_list_default_to_settings():
     client = MineruClient()
 
     from app.config import get_settings
@@ -130,12 +188,13 @@ def test_base_url_and_timeout_default_to_settings():
     settings = get_settings()
     assert client.base_url == settings.mineru_base_url
     assert client.timeout == settings.mineru_timeout
+    assert client.lang_list == settings.mineru_lang_list
 ```
 
 - [ ] **Step 2: 테스트 실패 확인**
 
 Run: `cd backend && app/venv/bin/python -m pytest tests/test_mineru_client.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.mineru_client'` (설정값 `mineru_base_url`/`mineru_timeout`도 아직 없으므로, 이를 먼저 추가해야 마지막 테스트가 의미 있게 실패/통과한다 — Step 3에서 `config.py`도 함께 수정).
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.mineru_client'` (설정값 `mineru_base_url`/`mineru_timeout`/`mineru_lang_list`도 아직 없으므로, 이를 먼저 추가해야 마지막 테스트가 의미 있게 실패/통과한다 — Step 3에서 `config.py`도 함께 수정).
 
 - [ ] **Step 3: `config.py`에 설정 추가**
 
@@ -146,6 +205,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.mineru_c
     mineru_base_url: str = "http://127.0.0.1:8100"
     mineru_timeout: float = 300.0  # seconds; large PDFs take much longer than a single OCR call
     mineru_enabled: bool = True
+    mineru_lang_list: list[str] = ["korean"]  # passed verbatim as /file_parse's lang_list form field
 ```
 
 - [ ] **Step 4: `mineru_client.py` 구현**
@@ -155,10 +215,13 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.mineru_c
 
 MinerU replaces this app's PyMuPDF-based PDF layout analysis - see
 docs/superpowers/specs/2026-08-31-mineru-pdf-parsing-design.md. This module
-only talks to the service and returns its content_list.json blocks verbatim;
-page-grouping and text assembly live in build_pages() (added in the next task).
+only talks to the service and returns its content_list blocks plus their
+images (as base64 data URIs - MinerU 3.4.5's /file_parse embeds images
+inline rather than exposing a shared output directory, verified 2026-08-31).
+Page-grouping and text assembly live in build_pages() (added in the next task).
 """
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -172,30 +235,36 @@ settings = get_settings()
 
 @dataclass
 class MineruResult:
-    """Raw content_list.json blocks plus where their img_path entries resolve to on disk."""
+    """content_list blocks plus their images (img_path -> base64 data URI)."""
 
     blocks: list
-    output_dir: Path
+    images: dict
 
 
 class MineruClient:
-    """Calls the MinerU HTTP service's /file_parse endpoint."""
+    """Calls the MinerU HTTP service's /file_parse endpoint (synchronous - it
+    waits for parsing to finish before responding, so no polling is needed).
+    """
 
     def __init__(
         self,
         base_url: Optional[str] = None,
         timeout: Optional[float] = None,
+        lang_list: Optional[list] = None,
         transport: Optional[httpx.BaseTransport] = None,
     ):
         self.base_url = base_url or settings.mineru_base_url
         self.timeout = timeout if timeout is not None else settings.mineru_timeout
+        self.lang_list = lang_list if lang_list is not None else settings.mineru_lang_list
         self._transport = transport
 
     def parse_pdf(self, file_path: str) -> MineruResult:
-        """Upload a PDF and return its parsed content_list blocks.
+        """Upload a PDF and return its parsed content_list blocks and images.
 
-        Raises on any transport error or non-2xx response - the caller
-        decides whether to fall back (see document_processor.load_pdf).
+        Raises httpx.HTTPStatusError on a non-2xx response, and RuntimeError
+        when the response is 200 but the parsing task itself failed. Either
+        way the caller decides whether to fall back (see
+        document_processor.load_pdf).
         """
         with httpx.Client(
             base_url=self.base_url, timeout=self.timeout, transport=self._transport
@@ -203,22 +272,50 @@ class MineruClient:
             with open(file_path, "rb") as f:
                 response = client.post(
                     "/file_parse",
-                    files={"file": (Path(file_path).name, f, "application/pdf")},
+                    files={"files": (Path(file_path).name, f, "application/pdf")},
+                    data={
+                        "backend": "pipeline",  # server default is hybrid-engine, which needs a local VLM
+                        "lang_list": self.lang_list,
+                        "return_content_list": "true",
+                        "return_images": "true",
+                        "return_md": "false",
+                    },
                 )
         response.raise_for_status()
         payload = response.json()
+
+        if payload.get("status") != "completed" or payload.get("error"):
+            raise RuntimeError(f"MinerU parsing failed: {payload.get('error') or payload.get('status')}")
+
+        file_stem = payload["file_names"][0]
+        entry = payload["results"][file_stem]
         return MineruResult(
-            blocks=payload["content_list"],
-            output_dir=Path(payload["output_dir"]),
+            blocks=json.loads(entry["content_list"]),
+            images=entry["images"],
         )
 ```
 
 - [ ] **Step 5: 테스트 통과 확인**
 
 Run: `cd backend && app/venv/bin/python -m pytest tests/test_mineru_client.py -v`
-Expected: PASS (3 tests)
+Expected: PASS (4 tests)
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 6: (선택, 권장) 실제 서비스로 스모크 검증**
+
+Task 1에서 띄운 실제 MinerU 서비스가 살아 있다면(`curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8100/docs`가 `200`), 실제 HTTP 호출로 한 번 더 검증한다:
+
+```bash
+cd backend && app/venv/bin/python -c "
+from app.services.mineru_client import MineruClient
+result = MineruClient().parse_pdf('/tmp/sample_img.pdf')
+print(len(result.blocks), 'blocks')
+print(list(result.images.keys()))
+"
+```
+
+Expected: 예외 없이 블록 수와 이미지 키가 출력된다(샘플 PDF가 없으면 이 단계는 건너뛰고 Task 7의 스모크 테스트에서 검증한다).
+
+- [ ] **Step 7: 커밋**
 
 ```bash
 git add backend/app/services/mineru_client.py backend/tests/test_mineru_client.py backend/app/config.py
@@ -234,8 +331,10 @@ git commit -m "feat: add MineruClient HTTP layer for the self-hosted MinerU serv
 - Modify: `backend/tests/test_mineru_client.py`
 
 **Interfaces:**
-- Consumes: `MineruResult`(Task 2), `settings.ocr_block_prefix`(기존 `config.py`).
-- Produces: `PdfPage(page_number, text, image_count=0, ocr_image_count=0, full_page_ocr=False, image_ids=[])`, `SupportsImageOcr` 프로토콜(`.image_to_text(image) -> str`), `build_pages(blocks: list[dict], output_dir: Path, ocr: Optional[SupportsImageOcr], image_dir: Optional[Path] = None) -> list[PdfPage]` — Task 4와 `document_processor.py`가 그대로 사용.
+- Consumes: `MineruResult`(Task 2, `blocks`/`images` 필드), `settings.ocr_block_prefix`(기존 `config.py`).
+- Produces: `PdfPage(page_number, text, image_count=0, ocr_image_count=0, full_page_ocr=False, image_ids=[])`, `SupportsImageOcr` 프로토콜(`.image_to_text(image) -> str`), `build_pages(blocks: list[dict], images: dict, ocr: Optional[SupportsImageOcr], image_dir: Optional[Path] = None) -> list[PdfPage]` — Task 4와 `document_processor.py`가 그대로 사용.
+
+`images`는 Task 2에서 확정된 실측 형태 그대로 `img_path -> "data:image/...;base64,..."` 딕셔너리다(파일 경로가 아니다).
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -257,21 +356,27 @@ class StubOCR:
         return self.text
 
 
-def _write_png(path, color=(10, 90, 200), size=(20, 15)):
+def _png_data_uri(color=(10, 90, 200), size=(20, 15)):
+    """MinerU's /file_parse images dict value shape: a base64 data URI."""
+    import base64
+    import io
+
     from PIL import Image as PILImage
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    PILImage.new("RGB", size, color).save(path, format="PNG")
+    buf = io.BytesIO()
+    PILImage.new("RGB", size, color).save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
-def test_text_table_equation_blocks_are_joined_in_reading_order(tmp_path):
+def test_text_table_equation_blocks_are_joined_in_reading_order():
     blocks = [
         {"type": "text", "page_idx": 0, "text": "제목입니다"},
         {"type": "table", "page_idx": 0, "table_body": "<table><tr><td>120억</td></tr></table>"},
         {"type": "equation", "page_idx": 0, "text": "E = mc^2"},
     ]
 
-    pages = build_pages(blocks, output_dir=tmp_path, ocr=StubOCR())
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
 
     assert len(pages) == 1
     page = pages[0]
@@ -283,13 +388,13 @@ def test_text_table_equation_blocks_are_joined_in_reading_order(tmp_path):
     assert page.text.index("제목입니다") < page.text.index("<table>") < page.text.index("E = mc^2")
 
 
-def test_pages_are_grouped_by_page_idx_zero_based_to_one_based(tmp_path):
+def test_pages_are_grouped_by_page_idx_zero_based_to_one_based():
     blocks = [
         {"type": "text", "page_idx": 0, "text": "첫 페이지"},
         {"type": "text", "page_idx": 1, "text": "둘째 페이지"},
     ]
 
-    pages = build_pages(blocks, output_dir=tmp_path, ocr=StubOCR())
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
 
     assert [p.page_number for p in pages] == [1, 2]
     assert pages[0].text == "첫 페이지"
@@ -297,14 +402,14 @@ def test_pages_are_grouped_by_page_idx_zero_based_to_one_based(tmp_path):
 
 
 def test_image_block_is_ocr_ed_and_labelled(tmp_path):
-    _write_png(tmp_path / "images" / "img1.png")
+    images = {"images/img1.png": _png_data_uri()}
     blocks = [
         {"type": "text", "page_idx": 0, "text": "그림 설명 앞"},
         {"type": "image", "page_idx": 0, "img_path": "images/img1.png"},
     ]
     image_dir = tmp_path / "saved"
 
-    pages = build_pages(blocks, output_dir=tmp_path, ocr=StubOCR("표: 매출 120억"), image_dir=image_dir)
+    pages = build_pages(blocks, images=images, ocr=StubOCR("표: 매출 120억"), image_dir=image_dir)
 
     page = pages[0]
     assert "[이미지 텍스트]\n표: 매출 120억" in page.text
@@ -314,63 +419,66 @@ def test_image_block_is_ocr_ed_and_labelled(tmp_path):
 
 
 def test_identical_image_bytes_across_pages_are_ocr_ed_once(tmp_path):
-    _write_png(tmp_path / "images" / "logo_p1.png", color=(5, 5, 5))
-    _write_png(tmp_path / "images" / "logo_p2.png", color=(5, 5, 5))  # same pixels -> same PNG bytes
+    same_uri = _png_data_uri(color=(5, 5, 5))
+    images = {
+        "images/logo_p1.png": same_uri,
+        "images/logo_p2.png": same_uri,  # same bytes, different img_path (repeated across pages)
+    }
     blocks = [
         {"type": "image", "page_idx": 0, "img_path": "images/logo_p1.png"},
         {"type": "image", "page_idx": 1, "img_path": "images/logo_p2.png"},
     ]
     ocr = StubOCR("로고 텍스트")
 
-    pages = build_pages(blocks, output_dir=tmp_path, ocr=ocr, image_dir=tmp_path / "saved")
+    pages = build_pages(blocks, images=images, ocr=ocr, image_dir=tmp_path / "saved")
 
     assert len(ocr.calls) == 1
     assert pages[0].image_ids == pages[1].image_ids == [pages[0].image_ids[0]]
 
 
-def test_image_with_no_recognised_text_contributes_nothing(tmp_path):
-    _write_png(tmp_path / "images" / "blank.png")
+def test_image_with_no_recognised_text_contributes_nothing():
+    images = {"images/blank.png": _png_data_uri()}
     blocks = [{"type": "image", "page_idx": 0, "img_path": "images/blank.png"}]
 
-    pages = build_pages(blocks, output_dir=tmp_path, ocr=StubOCR(""))
+    pages = build_pages(blocks, images=images, ocr=StubOCR(""))
 
     assert len(pages) == 1
     assert pages[0].text == ""
     assert pages[0].image_ids == []
 
 
-def test_ocr_none_skips_image_blocks_without_erroring(tmp_path):
-    _write_png(tmp_path / "images" / "img1.png")
+def test_ocr_none_skips_image_blocks_without_erroring():
+    images = {"images/img1.png": _png_data_uri()}
     blocks = [
         {"type": "text", "page_idx": 0, "text": "본문"},
         {"type": "image", "page_idx": 0, "img_path": "images/img1.png"},
     ]
 
-    pages = build_pages(blocks, output_dir=tmp_path, ocr=None)
+    pages = build_pages(blocks, images=images, ocr=None)
 
     assert pages[0].text == "본문"
     assert pages[0].image_ids == []
 
 
 def test_image_save_failure_does_not_break_text_extraction(tmp_path, monkeypatch):
-    _write_png(tmp_path / "images" / "img1.png")
+    images = {"images/img1.png": _png_data_uri()}
     blocks = [{"type": "image", "page_idx": 0, "img_path": "images/img1.png"}]
 
     monkeypatch.setattr("app.services.mineru_client._save_image", lambda *a, **k: False)
 
     pages = build_pages(
-        blocks, output_dir=tmp_path, ocr=StubOCR("인식됨"), image_dir=tmp_path / "saved"
+        blocks, images=images, ocr=StubOCR("인식됨"), image_dir=tmp_path / "saved"
     )
 
     assert "인식됨" in pages[0].text
     assert pages[0].image_ids == []
 
 
-def test_no_image_dir_skips_saving_without_failing(tmp_path):
-    _write_png(tmp_path / "images" / "img1.png")
+def test_no_image_dir_skips_saving_without_failing():
+    images = {"images/img1.png": _png_data_uri()}
     blocks = [{"type": "image", "page_idx": 0, "img_path": "images/img1.png"}]
 
-    pages = build_pages(blocks, output_dir=tmp_path, ocr=StubOCR("인식됨"))
+    pages = build_pages(blocks, images=images, ocr=StubOCR("인식됨"))
 
     assert "인식됨" in pages[0].text
     assert pages[0].image_ids == []
@@ -387,11 +495,12 @@ Expected: FAIL with `ImportError: cannot import name 'PdfPage'`
 
 ```python
 # 파일 상단 import 블록을 아래로 교체
+import hashlib
+import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Protocol
-import hashlib
-import logging
 
 import httpx
 
@@ -445,12 +554,22 @@ def _save_image(image: Any, image_dir: Path, image_id: str) -> bool:
         return False
 
 
-def _load_image_as_bgr(path: Path) -> Any:
-    """Load an image file into a BGR numpy array (matches PaddleOCR's expected order)."""
+def _decode_data_uri(data_uri: str) -> bytes:
+    """Decode a 'data:image/...;base64,....' URI into raw image bytes."""
+    import base64
+
+    _, encoded = data_uri.split(",", 1)
+    return base64.b64decode(encoded)
+
+
+def _bgr_array_from_bytes(raw: bytes) -> Any:
+    """Decode image bytes into a BGR numpy array (matches PaddleOCR's expected order)."""
+    import io
+
     import numpy as np
     from PIL import Image as PILImage
 
-    rgb = np.array(PILImage.open(path).convert("RGB"))
+    rgb = np.array(PILImage.open(io.BytesIO(raw)).convert("RGB"))
     return rgb[:, :, ::-1]
 
 
@@ -462,7 +581,7 @@ def _text_of(block: dict) -> str:
 
 def _ocr_image_block(
     block: dict,
-    output_dir: Path,
+    images: dict,
     ocr: SupportsImageOcr,
     cache: dict,
     image_dir: Optional[Path],
@@ -474,14 +593,13 @@ def _ocr_image_block(
     recognised text, matching the file-saving contract PaddleOCR splicing
     already used for embedded PDF images.
     """
-    img_path = output_dir / block["img_path"]
-    raw = img_path.read_bytes()
+    raw = _decode_data_uri(images[block["img_path"]])
     key = hashlib.md5(raw).hexdigest()[:16]
 
     if key in cache:
         return cache[key]
 
-    image = _load_image_as_bgr(img_path)
+    image = _bgr_array_from_bytes(raw)
     text = (ocr.image_to_text(image) or "").strip()
 
     image_id = None
@@ -495,16 +613,18 @@ def _ocr_image_block(
 
 def build_pages(
     blocks: list,
-    output_dir: Path,
+    images: dict,
     ocr: Optional[SupportsImageOcr],
     image_dir: Optional[Path] = None,
 ) -> list:
     """Group content_list blocks by page and assemble each page's PdfPage.
 
     Blocks arrive in MinerU's reading order already - this only groups by
-    page_idx, it does not re-sort within a page. ocr=None (settings.ocr_enabled
-    is False) skips OCR augmentation of image blocks entirely: they contribute
-    no text and no citation.
+    page_idx, it does not re-sort within a page. images maps each image
+    block's img_path to a base64 data URI (MinerU's /file_parse response
+    shape - see MineruResult). ocr=None (settings.ocr_enabled is False)
+    skips OCR augmentation of image blocks entirely: they contribute no
+    text and no citation.
     """
     by_page: dict = {}
     for block in blocks:
@@ -522,7 +642,7 @@ def build_pages(
             if block.get("type") == "image":
                 if ocr is None:
                     continue
-                text, image_id = _ocr_image_block(block, output_dir, ocr, cache, image_dir)
+                text, image_id = _ocr_image_block(block, images, ocr, cache, image_dir)
                 if not text:
                     continue
                 ocr_image_count += 1
@@ -550,7 +670,7 @@ def build_pages(
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `cd backend && app/venv/bin/python -m pytest tests/test_mineru_client.py -v`
-Expected: PASS (전체, Task 2의 3개 + 이번 태스크의 8개)
+Expected: PASS (전체, Task 2의 4개 + 이번 태스크의 8개)
 
 - [ ] **Step 5: 커밋**
 
@@ -568,7 +688,7 @@ git commit -m "feat: assemble MinerU content_list blocks into PdfPage objects"
 - Modify: `backend/tests/test_mineru_client.py`
 
 **Interfaces:**
-- Consumes: `MineruClient`, `MineruResult`(Task 2), `build_pages`, `PdfPage`, `SupportsImageOcr`(Task 3).
+- Consumes: `MineruClient`, `MineruResult`(Task 2, `blocks`/`images`), `build_pages`, `PdfPage`, `SupportsImageOcr`(Task 3).
 - Produces: `parse_and_build_pages(file_path: str, ocr: Optional[SupportsImageOcr], image_dir: Optional[Path] = None, client: Optional[MineruClient] = None) -> list[PdfPage]` — Task 5의 `document_processor.load_pdf()`가 그대로 사용.
 
 - [ ] **Step 1: 실패하는 테스트 작성**
@@ -582,21 +702,21 @@ from app.services.mineru_client import parse_and_build_pages
 class FakeMineruClient:
     """Stands in for MineruClient: returns canned blocks instead of calling HTTP."""
 
-    def __init__(self, blocks, output_dir):
+    def __init__(self, blocks, images):
         self.blocks = blocks
-        self.output_dir = output_dir
+        self.images = images
 
     def parse_pdf(self, file_path):
-        return MineruResult(blocks=self.blocks, output_dir=self.output_dir)
+        return MineruResult(blocks=self.blocks, images=self.images)
 
 
-def test_parse_and_build_pages_combines_client_and_page_assembly(tmp_path):
-    _write_png(tmp_path / "images" / "img1.png")
+def test_parse_and_build_pages_combines_client_and_page_assembly():
+    images = {"images/img1.png": _png_data_uri()}
     blocks = [
         {"type": "text", "page_idx": 0, "text": "본문"},
         {"type": "image", "page_idx": 0, "img_path": "images/img1.png"},
     ]
-    client = FakeMineruClient(blocks, tmp_path)
+    client = FakeMineruClient(blocks, images)
 
     pages = parse_and_build_pages("ignored.pdf", ocr=StubOCR("도표 텍스트"), client=client)
 
@@ -605,10 +725,10 @@ def test_parse_and_build_pages_combines_client_and_page_assembly(tmp_path):
     assert "도표 텍스트" in pages[0].text
 
 
-def test_ocr_none_is_forwarded_to_build_pages(tmp_path):
-    _write_png(tmp_path / "images" / "img1.png")
+def test_ocr_none_is_forwarded_to_build_pages():
+    images = {"images/img1.png": _png_data_uri()}
     blocks = [{"type": "image", "page_idx": 0, "img_path": "images/img1.png"}]
-    client = FakeMineruClient(blocks, tmp_path)
+    client = FakeMineruClient(blocks, images)
 
     pages = parse_and_build_pages("ignored.pdf", ocr=None, client=client)
 
@@ -624,7 +744,7 @@ def test_default_client_is_a_real_mineru_client(monkeypatch):
             created["called"] = True
 
         def parse_pdf(self, file_path):
-            return MineruResult(blocks=[], output_dir=Path("."))
+            return MineruResult(blocks=[], images={})
 
     monkeypatch.setattr("app.services.mineru_client.MineruClient", RecordingClient)
 
@@ -659,7 +779,7 @@ def parse_and_build_pages(
         client = MineruClient()
 
     result = client.parse_pdf(file_path)
-    return build_pages(result.blocks, result.output_dir, ocr, image_dir)
+    return build_pages(result.blocks, result.images, ocr, image_dir)
 ```
 
 - [ ] **Step 4: 테스트 통과 확인**
@@ -803,29 +923,37 @@ class StubOCR:
 
 
 class FakeMineruClient:
-    def __init__(self, blocks, output_dir):
+    def __init__(self, blocks, images):
         self.blocks = blocks
-        self.output_dir = output_dir
+        self.images = images
 
     def parse_pdf(self, file_path):
-        return MineruResult(blocks=self.blocks, output_dir=self.output_dir)
+        return MineruResult(blocks=self.blocks, images=self.images)
 
 
-def _write_png(path, color=(10, 90, 200), size=(20, 15)):
+def _png_data_uri(color=(10, 90, 200), size=(20, 15)):
+    """MinerU's /file_parse images dict value shape: a base64 data URI."""
+    import base64
+    import io
+
     from PIL import Image as PILImage
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    PILImage.new("RGB", size, color).save(path, format="PNG")
+    buf = io.BytesIO()
+    PILImage.new("RGB", size, color).save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
-def _client_with_text_and_image(tmp_path):
-    """text 블록 하나 + image 블록 하나짜리 가짜 MinerU 응답."""
-    _write_png(tmp_path / "images" / "img1.png")
+def _client_with_text_and_image(tmp_path=None):
+    """text 블록 하나 + image 블록 하나짜리 가짜 MinerU 응답. tmp_path 인자는
+    다른 태스크의 호출부와 시그니처를 맞추기 위해 남겨둔다(사용하지 않음 -
+    이미지는 더 이상 디스크 파일이 아니라 base64 데이터 URI로 인라인된다)."""
+    images = {"images/img1.png": _png_data_uri()}
     blocks = [
         {"type": "text", "page_idx": 0, "text": "Native text before the diagram"},
         {"type": "image", "page_idx": 0, "img_path": "images/img1.png"},
     ]
-    return FakeMineruClient(blocks, tmp_path)
+    return FakeMineruClient(blocks, images)
 
 
 def _real_minimal_pdf(tmp_path, name="diagram.pdf"):
