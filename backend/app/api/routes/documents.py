@@ -104,17 +104,22 @@ def load_parsed_document(document_id: str, parsed_dir: Path) -> ParsedDocumentDe
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parsed result not found")
 
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return ParsedDocumentDetail(**data)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return ParsedDocumentDetail(**data)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parsed result not found")
 
 
-@router.get("/parsed", response_model=List[ParsedDocumentSummary])
+@router.get("/parsed", response_model=List[ParsedDocumentSummary], response_model_exclude_none=True)
 async def get_parsed_documents() -> List[ParsedDocumentSummary]:
     """MinerU로 파싱된 문서 목록을 반환한다."""
     return list_parsed_documents(Path(settings.parsed_storage_dir))
 
 
-@router.get("/{document_id}/parsed", response_model=ParsedDocumentDetail)
+@router.get("/{document_id}/parsed", response_model=ParsedDocumentDetail, response_model_exclude_none=True)
 async def get_parsed_document(document_id: str) -> ParsedDocumentDetail:
     """한 문서의 MinerU 원본 파싱 결과(페이지별 블록)를 반환한다."""
     return load_parsed_document(document_id, Path(settings.parsed_storage_dir))

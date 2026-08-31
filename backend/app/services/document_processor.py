@@ -42,9 +42,9 @@ class DocumentProcessor:
         Args:
             file_path: Path to the PDF
             filename: Original filename
-            document_id: Document ID; required to persist extracted images.
-                Without it, text extraction proceeds unchanged and no images
-                are saved.
+            document_id: Document ID; required to persist extracted images
+                and the parsed-result JSON (see parsed_store.save). Without
+                it, text extraction proceeds unchanged and neither is saved.
 
         Returns:
             List of Document objects, one per page

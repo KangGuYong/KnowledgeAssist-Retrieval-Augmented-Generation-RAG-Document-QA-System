@@ -103,3 +103,41 @@ def test_save_creates_parsed_storage_dir_when_missing(tmp_path, monkeypatch):
     parsed_store.save("doc_e", "e.pdf", result, tmp_path / "images")
 
     assert (parsed_dir / "doc_e.json").exists()
+
+
+def test_save_leaves_no_tmp_file_behind_on_success(tmp_path, monkeypatch):
+    """_save() writes to a .tmp file then atomically renames it - a
+    crash/disk-full mid-write must never leave a truncated .json on disk.
+    On success, no .tmp file should remain."""
+    parsed_dir = tmp_path / "parsed"
+    monkeypatch.setattr(parsed_store.settings, "parsed_storage_dir", str(parsed_dir))
+    result = MineruResult(blocks=[{"type": "text", "page_idx": 0, "text": "x"}], images={})
+
+    parsed_store.save("doc_f", "f.pdf", result, tmp_path / "images")
+
+    files = sorted(p.name for p in parsed_dir.iterdir())
+    assert files == ["doc_f.json"]
+
+
+def test_save_skips_malformed_block_but_keeps_good_blocks_on_same_page(tmp_path, monkeypatch):
+    """A single malformed block (an unexpected shape that makes
+    _serialize_block raise - here, a non-string "text" field so .strip()
+    blows up) must not destroy the whole page/document - only that block
+    is skipped, matching build_pages()'s per-block try/except pattern."""
+    monkeypatch.setattr(parsed_store.settings, "parsed_storage_dir", str(tmp_path / "parsed"))
+    result = MineruResult(
+        blocks=[
+            {"type": "text", "page_idx": 0, "text": "좋은 블록 1"},
+            {"type": "text", "page_idx": 0, "text": 12345},  # malformed - int has no .strip()
+            {"type": "text", "page_idx": 0, "text": "좋은 블록 2"},
+        ],
+        images={},
+    )
+
+    parsed_store.save("doc_g", "g.pdf", result, tmp_path / "images")
+
+    data = json.loads((tmp_path / "parsed" / "doc_g.json").read_text(encoding="utf-8"))
+    assert data["pages"][0]["blocks"] == [
+        {"type": "text", "text": "좋은 블록 1"},
+        {"type": "text", "text": "좋은 블록 2"},
+    ]

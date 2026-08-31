@@ -71,3 +71,28 @@ def test_load_parsed_document_rejects_unsafe_ids(document_id, tmp_path):
         load_parsed_document(document_id, tmp_path)
 
     assert exc.value.status_code == 404
+
+
+def test_load_parsed_document_returns_404_not_500_for_corrupt_json(tmp_path):
+    """A truncated/corrupt parsed JSON file (e.g. left by a crash mid-write,
+    before the atomic-write fix) must look like a missing file to the
+    client, not surface as an unhandled 500."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "doc_corrupt.json").write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as exc:
+        load_parsed_document("doc_corrupt", tmp_path)
+
+    assert exc.value.status_code == 404
+
+
+def test_load_parsed_document_returns_404_for_json_missing_required_fields(tmp_path):
+    """Valid JSON that doesn't match ParsedDocumentDetail's schema (e.g. a
+    pydantic validation error) must also come back as 404, not 500."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "doc_bad_shape.json").write_text(json.dumps({"unexpected": "shape"}), encoding="utf-8")
+
+    with pytest.raises(HTTPException) as exc:
+        load_parsed_document("doc_bad_shape", tmp_path)
+
+    assert exc.value.status_code == 404

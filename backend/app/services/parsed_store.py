@@ -39,15 +39,15 @@ def _save(document_id: str, filename: str, result: MineruResult, image_dir: Path
     for block in result.blocks:
         by_page.setdefault(block.get("page_idx", 0), []).append(block)
 
-    pages = [
-        {
-            "page_number": page_idx + 1,
-            "blocks": [
-                _serialize_block(block, result.images, image_dir) for block in by_page[page_idx]
-            ],
-        }
-        for page_idx in sorted(by_page)
-    ]
+    pages = []
+    for page_idx in sorted(by_page):
+        blocks = []
+        for block in by_page[page_idx]:
+            try:
+                blocks.append(_serialize_block(block, result.images, image_dir))
+            except Exception as e:
+                logger.warning("Skipping malformed block on page %s: %s", page_idx + 1, e)
+        pages.append({"page_number": page_idx + 1, "blocks": blocks})
 
     document = {
         "document_id": document_id,
@@ -59,9 +59,10 @@ def _save(document_id: str, filename: str, result: MineruResult, image_dir: Path
 
     parsed_dir = Path(settings.parsed_storage_dir)
     parsed_dir.mkdir(parents=True, exist_ok=True)
-    (parsed_dir / f"{document_id}.json").write_text(
-        json.dumps(document, ensure_ascii=False), encoding="utf-8"
-    )
+    target = parsed_dir / f"{document_id}.json"
+    tmp = parsed_dir / f".{document_id}.json.tmp"
+    tmp.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(target)
 
 
 def _serialize_block(block: dict, images: dict, image_dir: Path) -> dict:
