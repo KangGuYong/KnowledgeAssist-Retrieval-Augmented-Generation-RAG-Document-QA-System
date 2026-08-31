@@ -226,7 +226,17 @@ def build_pages(
         image_ids = []
 
         for block in page_blocks:
-            if block.get("type") == "image":
+            block_type = block.get("type")
+            if block_type in ("table", "equation"):
+                text = _text_of(block)
+                if text:
+                    parts.append(text)
+            elif block.get("img_path"):
+                # "image", "chart", and any other MinerU visual-figure
+                # subtype - anything with img_path that isn't a table/
+                # equation screenshot. Verified live 2026-08-31: MinerU
+                # emits type="chart" (not "image") for some figures, with
+                # the same img_path/text shape as an "image" block.
                 if ocr is None:
                     continue
                 text, image_id = _ocr_image_block(block, images, ocr, cache, image_dir)
@@ -245,7 +255,10 @@ def build_pages(
             PdfPage(
                 page_number=page_idx + 1,
                 text="\n\n".join(parts),
-                image_count=sum(1 for b in page_blocks if b.get("type") == "image"),
+                image_count=sum(
+                    1 for b in page_blocks
+                    if b.get("img_path") and b.get("type") not in ("table", "equation")
+                ),
                 ocr_image_count=ocr_image_count,
                 image_ids=image_ids,
             )

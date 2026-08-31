@@ -302,3 +302,43 @@ def test_image_block_resolves_img_path_with_a_directory_prefix_against_a_bare_fi
     pages = build_pages(blocks, images=images, ocr=StubOCR("도표 텍스트"))
 
     assert "도표 텍스트" in pages[0].text
+
+
+def test_a_non_image_typed_block_with_img_path_is_still_ocr_ed_and_cited(tmp_path):
+    """Reproduces a real MinerU response observed live (2026-08-31): a figure
+    block came back as type="chart", not "image", but with the same
+    img_path/empty-text shape. build_pages() must not silently drop it."""
+    images = {"images/chart1.png": _png_data_uri()}
+    blocks = [
+        {"type": "text", "page_idx": 0, "text": "본문 앞부분"},
+        {"type": "chart", "page_idx": 0, "img_path": "images/chart1.png", "text": ""},
+    ]
+    image_dir = tmp_path / "saved"
+
+    pages = build_pages(blocks, images=images, ocr=StubOCR("차트 안의 텍스트"), image_dir=image_dir)
+
+    page = pages[0]
+    assert "[이미지 텍스트]\n차트 안의 텍스트" in page.text
+    assert page.ocr_image_count == 1
+    assert len(page.image_ids) == 1
+    assert (image_dir / f"{page.image_ids[0]}.png").exists()
+
+
+def test_table_block_with_an_img_path_screenshot_still_uses_table_body_not_ocr():
+    """Per the spec's schema, table blocks also carry img_path (a
+    screenshot) - this must NOT be routed through the image-OCR path even
+    though it now matches "has img_path"."""
+    blocks = [
+        {
+            "type": "table",
+            "page_idx": 0,
+            "img_path": "images/table_screenshot.jpg",
+            "table_body": "<table><tr><td>매출</td><td>120억</td></tr></table>",
+        }
+    ]
+    ocr = StubOCR("이건 호출되면 안 됨")
+
+    pages = build_pages(blocks, images={}, ocr=ocr)
+
+    assert "<table><tr><td>매출</td><td>120억</td></tr></table>" in pages[0].text
+    assert ocr.calls == []
