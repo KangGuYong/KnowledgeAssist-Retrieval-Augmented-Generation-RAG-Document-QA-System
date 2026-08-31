@@ -79,14 +79,37 @@ GPU는 이미 ComfyUI가 점유하고 있는 자원을 공유하게 된다 — �
 | `table` | `img_path`(스크린샷), `table_body`(HTML), `table_caption`, `table_footnote` |
 | `equation` | `img_path`, `text`(LaTeX), `text_format` |
 
-**가정**: 백엔드와 MinerU 서비스가 같은 DGX 머신에서 돈다는 전제 하에,
-`img_path`가 가리키는 이미지 파일을 백엔드가 로컬 파일시스템 경로로 직접 읽을
-수 있다고 가정한다(같은 호스트의 MinerU 출력 디렉터리를 백엔드가 읽기 접근
-가능하도록 구성). `mineru-api`가 이미지 바이트를 응답(JSON/ZIP)에 직접
-포함해 반환하는지, 출력 디렉터리를 통해서만 접근 가능한지는 실제 설치된
-MinerU 버전의 API로 구현 시점에 확인해야 한다 — 둘 중 어느 쪽이든
-`mineru_client.parse_pdf()`의 내부 구현만 달라질 뿐 이후 아키텍처(3.3~3.4절)에는
-영향이 없다.
+**실측 확인됨** (2026-08-31, 설치된 MinerU 3.4.5, `mineru-api --port 8100`):
+`/file_parse`에 실제 요청을 보내 응답 형태를 확인했다 — 이전 버전의 "가정"
+문단(같은 호스트 파일시스템을 공유한다는 가정)은 **틀렸다.** 실제로는:
+
+- 요청은 `multipart/form-data`, 파일 필드명은 `files`(복수, 배열 — 단일
+  파일 업로드도 `files=`로 보낸다). `backend` 폼 필드의 **기본값은
+  `hybrid-engine`**(로컬 VLM 필요)이라 **반드시 명시적으로
+  `backend=pipeline`을 보내야** 2절의 "완전 대체, 부분 재사용" 원칙(VLM
+  백엔드는 비대상)이 지켜진다. `return_content_list=true`,
+  `return_images=true`도 기본값이 `false`라 명시적으로 켜야 한다.
+  `lang_list`의 기본값은 `["ch"]`(중국어)라, 이 앱의 문서가 한국어이므로
+  `lang_list=korean`을 보낸다("Korean, English" 인식).
+- 응답은 `content_list.json`을 감싼 **작업(task) 봉투**다:
+  `{"task_id", "status", "error", "file_names": ["sample"], "results":
+  {"sample": {"content_list": "<JSON 문자열>", "images": {...}}}}`.
+  `results`는 업로드 파일명의 확장자 없는 스템으로 키가 잡히므로,
+  `file_names[0]`으로 조회한다. `/file_parse`는 동기 엔드포인트라
+  `status`는 이미 `"completed"`(또는 실패 시 `"failed"`+`error`)로 와서
+  별도 폴링이 필요 없다.
+- `content_list`는 (블록 배열이 아니라) **그 배열을 담은 JSON 문자열**이라
+  한 번 더 `json.loads()`해야 한다.
+- `images`는 `{img_path: "data:image/jpeg;base64,..."}` 형태의 **base64
+  데이터 URI 딕셔너리**다 — 파일시스템 경로가 전혀 아니다. 즉 "같은 호스트
+  파일시스템 공유" 가정은 필요 없다: 이미지 바이트가 응답 JSON 안에 직접
+  들어온다. MinerU 서비스가 백엔드와 다른 호스트에 있어도 이 설계는 그대로
+  동작한다(장점이자, 원래 가정이 틀렸던 이유).
+
+3.3~3.4절의 구현은 이 실측 결과를 반영한다: `MineruResult`는
+`output_dir: Path` 대신 `images: dict[str, str]`(img_path → base64 데이터
+URI)을 담고, 이미지 블록 처리는 파일을 여는 대신 이 딕셔너리에서
+`img_path`를 찾아 base64 디코드한다.
 
 ### 3.3 백엔드 통합 모듈
 
@@ -94,10 +117,14 @@ MinerU 버전의 API로 구현 시점에 확인해야 한다 — 둘 중 어느 
 **`backend/app/services/mineru_client.py`**로 대체한다.
 
 ```python
-def parse_pdf(file_path: str) -> list[dict]:
-    """MinerU 서비스를 호출해 content_list.json 블록 목록을 받아온다.
-    실패 시(연결 오류/타임아웃/5xx) 예외를 그대로 전파한다 — 폴백 판단은
-    호출자(document_processor.load_pdf)의 책임."""
+def parse_pdf(file_path: str) -> MineruResult:
+    """MinerU 서비스(/file_parse)를 호출해 content_list 블록과 이미지
+    (img_path -> base64 데이터 URI)를 받아온다. backend=pipeline,
+    lang_list=korean, return_content_list=true, return_images=true를
+    명시적으로 보낸다(서버 기본값은 hybrid-engine/false/["ch"]). 응답의
+    status가 completed가 아니거나 error가 있으면, 혹은 연결 오류/타임아웃/
+    5xx면 예외를 그대로 전파한다 — 폴백 판단은 호출자(document_processor.
+    load_pdf)의 책임."""
 ```
 
 `document_processor.load_pdf()`는 `extract_pages()` 호출을 `mineru_client`
@@ -134,13 +161,15 @@ PdfPage(
 
 ### 3.4 이미지 처리 & 인용 기능 유지
 
-`image` 블록마다 MinerU가 저장한 파일(`img_path`)을 읽어 numpy 배열로 변환하고,
-기존 `get_ocr_service().image_to_text(image)`를 그대로 호출한다. PaddleOCR
-서브프로세스 격리(`ocr_isolate_process`, `ocr_subprocess.py`)는 수정하지 않는다.
+`image` 블록마다 `images[block["img_path"]]`(base64 데이터 URI)를 디코드해
+numpy 배열로 변환하고, 기존 `get_ocr_service().image_to_text(image)`를 그대로
+호출한다. PaddleOCR 서브프로세스 격리(`ocr_isolate_process`,
+`ocr_subprocess.py`)는 수정하지 않는다.
 
 ```python
 for block in image_blocks_on_page:
-    raw = load_image_as_bgr_array(mineru_output_dir / block["img_path"])
+    data_uri = images[block["img_path"]]  # "data:image/jpeg;base64,...."
+    raw = load_image_as_bgr_array_from_data_uri(data_uri)
     text = ocr.image_to_text(raw)
     if text:
         page_text_parts.append(_format_ocr_block(text))  # 기존 [이미지 텍스트] 마커 재사용
@@ -182,6 +211,7 @@ MinerU 서비스가 다운되어 있거나, 특정 PDF에서 파싱 오류를 �
 | `mineru_base_url` | `"http://127.0.0.1:8100"` | MinerU 서비스 주소 |
 | `mineru_timeout` | `300.0` | 초 단위. 대형 PDF(수백 페이지) 고려, 기존 `ocr_timeout`(이미지 1장당 120초)보다 훨씬 큰 문서 단위 타임아웃 |
 | `mineru_enabled` | `True` | `False`면 3.5절 폴백과 동일하게 항상 `PyPDFLoader`만 사용 |
+| `mineru_lang_list` | `["korean"]` | `/file_parse`의 `lang_list` 폼 필드로 그대로 전달. 서버 기본값(`["ch"]`, 중국어)은 이 앱의 한국어 문서에 맞지 않아 실측 후 추가(3.2절) |
 
 **제거 대상** — PyMuPDF 레이아웃 판단 전용이라 MinerU 도입 후 무의미해지는
 설정: `ocr_dpi`, `ocr_min_image_size`, `ocr_max_images_per_page`,
