@@ -403,3 +403,45 @@ def test_equation_block_with_empty_text_falls_back_to_ocr():
 
     assert "[이미지 텍스트]\n수식 이미지에서 읽은 텍스트" in pages[0].text
     assert pages[0].ocr_image_count == 1
+
+
+from app.services.mineru_client import persist_block_image
+
+
+def test_persist_block_image_saves_and_returns_content_addressed_id(tmp_path):
+    import hashlib
+
+    data_uri = _png_data_uri()
+    raw = _decode_data_uri_for_test(data_uri)
+    expected_id = hashlib.md5(raw).hexdigest()[:16]
+    block = {"type": "image", "page_idx": 0, "img_path": "images/fig1.png"}
+    images = {"images/fig1.png": data_uri}
+    image_dir = tmp_path / "saved"
+
+    result = persist_block_image(block, images, image_dir)
+
+    assert result == expected_id
+    assert (image_dir / f"{expected_id}.png").exists()
+
+
+def _decode_data_uri_for_test(data_uri: str) -> bytes:
+    import base64
+
+    _, encoded = data_uri.split(",", 1)
+    return base64.b64decode(encoded)
+
+
+def test_persist_block_image_returns_none_when_no_img_path(tmp_path):
+    block = {"type": "text", "page_idx": 0, "text": "본문"}
+
+    result = persist_block_image(block, images={}, image_dir=tmp_path / "saved")
+
+    assert result is None
+
+
+def test_persist_block_image_returns_none_when_images_dict_missing_key(tmp_path):
+    block = {"type": "image", "page_idx": 0, "img_path": "images/missing.png"}
+
+    result = persist_block_image(block, images={}, image_dir=tmp_path / "saved")
+
+    assert result is None
