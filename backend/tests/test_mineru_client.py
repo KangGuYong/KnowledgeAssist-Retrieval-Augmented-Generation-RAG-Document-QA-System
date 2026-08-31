@@ -288,3 +288,17 @@ def test_default_client_is_a_real_mineru_client(monkeypatch):
     parse_and_build_pages("ignored.pdf", ocr=None, client=None)
 
     assert created.get("called") is True
+
+
+def test_image_block_resolves_img_path_with_a_directory_prefix_against_a_bare_filename_key():
+    """Reproduces a real defect found via manual smoke testing against the
+    live MinerU 3.4.5 service (2026-08-31): content_list blocks' img_path
+    has an "images/" prefix, but the images dict is keyed by the bare
+    filename - not the same string. Every other fixture in this file
+    accidentally uses matching keys on both sides and would NOT catch this."""
+    images = {"onlyfilename.png": _png_data_uri()}
+    blocks = [{"type": "image", "page_idx": 0, "img_path": "images/onlyfilename.png"}]
+
+    pages = build_pages(blocks, images=images, ocr=StubOCR("도표 텍스트"))
+
+    assert "도표 텍스트" in pages[0].text

@@ -134,6 +134,21 @@ def _decode_data_uri(data_uri: str) -> bytes:
     return base64.b64decode(encoded)
 
 
+def _lookup_image(images: dict, img_path: str) -> str:
+    """Resolve a content_list block's img_path to its data URI in `images`.
+
+    Verified against a live MinerU 3.4.5 /file_parse response (2026-08-31):
+    content_list blocks' img_path includes a directory prefix (e.g.
+    "images/<hash>.jpg"), but the images dict is actually keyed by the bare
+    filename (e.g. "<hash>.jpg") - they are NOT the same string. Try the
+    exact key first (forward-compatible if a future version matches
+    directly), then fall back to matching by basename.
+    """
+    if img_path in images:
+        return images[img_path]
+    return images[Path(img_path).name]
+
+
 def _bgr_array_from_bytes(raw: bytes) -> Any:
     """Decode image bytes into a BGR numpy array (matches PaddleOCR's expected order)."""
     import io
@@ -165,7 +180,7 @@ def _ocr_image_block(
     recognised text, matching the file-saving contract PaddleOCR splicing
     already used for embedded PDF images.
     """
-    raw = _decode_data_uri(images[block["img_path"]])
+    raw = _decode_data_uri(_lookup_image(images, block["img_path"]))
     key = hashlib.md5(raw).hexdigest()[:16]
 
     if key in cache:
