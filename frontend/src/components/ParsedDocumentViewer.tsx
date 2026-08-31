@@ -5,13 +5,30 @@ import { apiService } from '../services/api';
 import { ParsedBlock, ParsedDocumentDetail, ParsedDocumentSummary } from '../types/api.types';
 import '../styles/ParsedDocumentViewer.css';
 
+function imageUrl(documentId: string, imageId: string): string {
+  return `${import.meta.env.VITE_API_BASE_URL ?? ''}/api/v1/documents/${documentId}/images/${imageId}`;
+}
+
 function ParsedBlockView({ documentId, block }: { documentId: string; block: ParsedBlock }) {
+  // A table block can carry both table_body (MinerU's HTML extraction) and
+  // image_id (the screenshot MinerU actually parsed) at once - render both
+  // so a user can compare them, rather than returning early on one.
   if (block.table_body) {
     return (
-      <div
-        className="parsed-block parsed-block-table"
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(block.table_body) }}
-      />
+      <>
+        <div
+          className="parsed-block parsed-block-table"
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(block.table_body) }}
+        />
+        {block.image_id && (
+          <img
+            className="parsed-block parsed-block-image parsed-block-table-image"
+            src={imageUrl(documentId, block.image_id)}
+            alt="table 블록 스크린샷"
+            loading="lazy"
+          />
+        )}
+      </>
     );
   }
 
@@ -27,7 +44,7 @@ function ParsedBlockView({ documentId, block }: { documentId: string; block: Par
     return (
       <img
         className="parsed-block parsed-block-image"
-        src={`/api/v1/documents/${documentId}/images/${block.image_id}`}
+        src={imageUrl(documentId, block.image_id)}
         alt={`${block.type} 블록`}
         loading="lazy"
       />
