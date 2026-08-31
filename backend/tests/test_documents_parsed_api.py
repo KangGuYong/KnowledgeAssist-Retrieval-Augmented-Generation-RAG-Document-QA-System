@@ -7,7 +7,7 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from app.api.routes.documents import list_parsed_documents, load_parsed_document
+from app.api.routes.documents import delete_parsed_result, list_parsed_documents, load_parsed_document
 
 
 def _write_parsed(dir_, document_id, filename="a.pdf", page_count=1, pages=None):
@@ -96,3 +96,25 @@ def test_load_parsed_document_returns_404_for_json_missing_required_fields(tmp_p
         load_parsed_document("doc_bad_shape", tmp_path)
 
     assert exc.value.status_code == 404
+
+
+def test_delete_parsed_result_removes_the_document_json(tmp_path):
+    _write_parsed(tmp_path, "doc_a")
+    _write_parsed(tmp_path, "doc_b")
+
+    delete_parsed_result("doc_a", tmp_path)
+
+    assert not (tmp_path / "doc_a.json").exists()
+    assert (tmp_path / "doc_b.json").exists()  # 다른 문서는 건드리지 않는다
+
+
+def test_delete_parsed_result_when_file_absent_does_not_raise(tmp_path):
+    delete_parsed_result("doc_never_existed", tmp_path)
+
+
+def test_delete_parsed_result_with_unsafe_id_is_a_noop(tmp_path):
+    _write_parsed(tmp_path, "doc_a")
+
+    delete_parsed_result("../doc_a", tmp_path)
+
+    assert (tmp_path / "doc_a.json").exists()

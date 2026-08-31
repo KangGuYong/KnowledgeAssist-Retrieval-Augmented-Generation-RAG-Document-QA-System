@@ -60,6 +60,27 @@ def delete_document_images(document_id: str, storage_root: Path) -> None:
     logger.info("Removed image directory for document %s", document_id)
 
 
+def delete_parsed_result(document_id: str, parsed_dir: Path) -> None:
+    """문서의 파싱 결과 JSON을 제거한다. 없으면 아무것도 하지 않는다.
+
+    delete_document_images와 동일한 화이트리스트 검증 패턴을 따른다 -
+    document_id는 사용자 입력이 파일 경로가 되므로 경로 이탈을 막는다.
+    """
+    if not _SAFE_ID.match(document_id):
+        logger.warning("Refusing to delete parsed result for unsafe document_id")
+        return
+
+    root = Path(parsed_dir).resolve()
+    target = (root / f"{document_id}.json").resolve()
+
+    if not target.is_relative_to(root):
+        logger.warning("Refusing to delete parsed result outside storage root")
+        return
+
+    target.unlink(missing_ok=True)
+    logger.info("Removed parsed result for document %s", document_id)
+
+
 @router.get("/{document_id}/images/{image_id}")
 async def get_document_image(document_id: str, image_id: str) -> FileResponse:
     """문서에서 추출된 도표 이미지를 서빙한다."""
@@ -141,7 +162,7 @@ async def get_documents() -> List[DocumentInfo]:
 @router.delete("/{document_id}")
 async def delete_document(document_id: str):
     """
-    Delete a document and all its associated chunks and images.
+    Delete a document and all its associated chunks, images, and parsed result.
 
     Note: This is a placeholder implementation.
     In a production system, you would also delete from the database.
@@ -152,6 +173,7 @@ async def delete_document(document_id: str):
         vector_service = VectorStoreService()
         vector_service.delete_by_document_id(document_id)
         delete_document_images(document_id, Path(settings.image_storage_dir))
+        delete_parsed_result(document_id, Path(settings.parsed_storage_dir))
 
         return {"message": f"Document {document_id} deleted successfully"}
 
