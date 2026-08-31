@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     ocr_empty_placeholder: str = "[이미지]"
     image_storage_dir: str = "app/storage/images"  # 도표 이미지 저장 경로
 
+    # MinerU (PDF layout/table/formula parsing service)
+    mineru_base_url: str = "http://127.0.0.1:8100"
+    mineru_timeout: float = 300.0  # seconds; large PDFs take much longer than a single OCR call
+    mineru_enabled: bool = True
+    mineru_lang_list: list[str] = ["korean"]  # passed verbatim as /file_parse's lang_list form field
+
     # RAG Configuration
     chunk_size: int = 1000
     chunk_overlap: int = 200
