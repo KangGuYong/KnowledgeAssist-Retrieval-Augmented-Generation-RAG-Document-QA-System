@@ -74,45 +74,58 @@ Manages ChromaDB vector database operations.
 
 Orchestrates the retrieval-augmented generation pipeline using LangChain.
 
-## PDF image OCR
+## PDF parsing (MinerU + PaddleOCR)
 
-Every PDF page is split into layout blocks with PyMuPDF. Text blocks are kept
-as they are; each image block is rendered at `OCR_DPI` and passed to PaddleOCR,
-and the recognised text is spliced back in at the position the image occupied,
-labelled with `OCR_BLOCK_PREFIX` (`[이미지 텍스트]`). The page then flows into
-the normal chunking and embedding path.
+PDF layout, table, and equation extraction is delegated to
+[MinerU](https://github.com/opendatalab/MinerU), a self-hosted HTTP
+service run separately from this backend (`mineru-api`, default
+`http://127.0.0.1:8100`, configured via `MINERU_BASE_URL`). Start it with:
 
-Two shortcuts keep cost down: a page with almost no native text (a scan) or one
-sliced into more than `OCR_MAX_IMAGES_PER_PAGE` fragments is recognised in a
-single full-page pass, and repeated images (logos, headers) are recognised once
-and reused across the document. Images smaller than `OCR_MIN_IMAGE_SIZE` points
-are skipped as decoration.
+```bash
+~/mineru-venv/bin/mineru-api --host 0.0.0.0 --port 8100
+```
 
-Chunk metadata carries `ocr_used`, `ocr_image_count`, and `full_page_ocr`
-alongside `page`, so it is visible which answers came from recognised images.
+(install with `pip install "mineru[core]"` into its own virtualenv - not
+this backend's `app/venv` - MinerU is a separate process, not a Python
+dependency of this app). `MINERU_ENABLED=False` skips it entirely and falls
+back to plain `pypdf` text extraction, same as when the service is
+unreachable or a specific PDF fails to parse: uploads never fail just
+because MinerU could not run, they just lose layout/table/equation/image
+handling for that document and log a warning.
+
+MinerU returns each page's content as blocks (text, table, equation,
+image/chart/etc.) in reading order. Text and headings are kept as-is;
+tables come back as HTML, equations as LaTeX. MinerU does not itself read
+text embedded inside figures/charts - those blocks are cropped and passed
+to PaddleOCR (`korean_PP-OCRv5_mobile_rec` + `PP-OCRv5_mobile_det`), and
+the recognised text is spliced back in at the figure's position, labelled
+with `OCR_BLOCK_PREFIX` (`[이미지 텍스트]`) so retrieved chunks show where
+it came from. `OCR_ENABLED=False` leaves MinerU's own layout/table/equation
+extraction running but skips this PaddleOCR augmentation step, so figures
+contribute no text.
+
+Chunk metadata carries `ocr_used` and `ocr_image_count` alongside `page`,
+so it is visible which answers came from recognised images.
 
 OCR runs in a **separate process**. `paddlex` imports `modelscope`, which
-imports `torch`, and Paddle's inference predictor segfaults in a process that
-has torch loaded — which this one does, for the embedding model. The worker
-(`app/services/ocr_worker.py`) is spawned on demand, stubs out `modelscope` so
-torch never reaches it, loads the models once, and is reused for every later
-page. If it dies or exceeds `OCR_TIMEOUT`, it is replaced and the upload
-continues with whatever text the page already had. Because the worker is
-spawned (not forked), the entry point that starts the app must not import
-torch at import time; the worker refuses to run rather than crash if it does.
-Set `OCR_ISOLATE_PROCESS=False` to run OCR in-process where that conflict does
-not exist.
+imports `torch`, and Paddle's inference predictor segfaults in a process
+that has torch loaded - which this one does, for the embedding model. The
+worker (`app/services/ocr_worker.py`) is spawned on demand, stubs out
+`modelscope` so torch never reaches it, loads the models once, and is
+reused for every later page. If it dies or exceeds `OCR_TIMEOUT`, it is
+replaced and the upload continues with whatever text the page already had.
+Because the worker is spawned (not forked), the entry point that starts the
+app must not import torch at import time; the worker refuses to run rather
+than crash if it does. Set `OCR_ISOLATE_PROCESS=False` to run OCR in-process
+where that conflict does not exist.
 
 On first use the detection and recognition models are downloaded from
 Hugging Face into `~/.paddlex/official_models` (a few minutes; the first
 upload after a fresh install will block on it). Later runs load from that
-cache. On CPU, expect roughly 2 s per image region and 5 s per scanned A4
-page.
+cache. On CPU, expect roughly 2 s per image region.
 
 Set `OCR_DEVICE=gpu` (with `paddlepaddle-gpu` installed instead of
-`paddlepaddle`) to run recognition on CUDA, or `OCR_ENABLED=False` to fall back
-to plain `pypdf` text extraction. OCR failures never fail an upload: the loader
-falls back to text-only extraction and logs a warning.
+`paddlepaddle`) to run recognition on CUDA.
 
 ## Default local model configuration
 

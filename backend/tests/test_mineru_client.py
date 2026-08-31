@@ -342,3 +342,64 @@ def test_table_block_with_an_img_path_screenshot_still_uses_table_body_not_ocr()
 
     assert "<table><tr><td>매출</td><td>120억</td></tr></table>" in pages[0].text
     assert ocr.calls == []
+
+
+def test_a_block_that_raises_does_not_abort_the_rest_of_the_page():
+    """A missing images-dict entry (or any other per-block failure) must
+    cost only that block, not the whole page - pdf_ocr.py (this module's
+    predecessor) guaranteed this per-image; build_pages() must too."""
+    blocks = [
+        {"type": "text", "page_idx": 0, "text": "본문 앞부분"},
+        {"type": "image", "page_idx": 0, "img_path": "images/missing.png"},  # not in images dict
+        {"type": "text", "page_idx": 0, "text": "본문 뒷부분"},
+    ]
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR("무시됨"))
+
+    assert "본문 앞부분" in pages[0].text
+    assert "본문 뒷부분" in pages[0].text
+    assert pages[0].ocr_image_count == 0
+
+
+def test_a_block_missing_page_idx_defaults_to_page_one_instead_of_crashing():
+    blocks = [{"type": "text", "text": "page_idx 없는 블록"}]  # no page_idx key at all
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
+
+    assert len(pages) == 1
+    assert pages[0].page_number == 1
+    assert "page_idx 없는 블록" in pages[0].text
+
+
+def test_table_block_with_empty_table_body_falls_back_to_ocr():
+    images = {"images/table_shot.png": _png_data_uri()}
+    blocks = [
+        {
+            "type": "table",
+            "page_idx": 0,
+            "img_path": "images/table_shot.png",
+            "table_body": "",  # recognition failed server-side
+        }
+    ]
+
+    pages = build_pages(blocks, images=images, ocr=StubOCR("표 이미지에서 읽은 텍스트"))
+
+    assert "[이미지 텍스트]\n표 이미지에서 읽은 텍스트" in pages[0].text
+    assert pages[0].ocr_image_count == 1
+
+
+def test_equation_block_with_empty_text_falls_back_to_ocr():
+    images = {"images/eqn_shot.png": _png_data_uri()}
+    blocks = [
+        {
+            "type": "equation",
+            "page_idx": 0,
+            "img_path": "images/eqn_shot.png",
+            "text": "",  # LaTeX recognition failed
+        }
+    ]
+
+    pages = build_pages(blocks, images=images, ocr=StubOCR("수식 이미지에서 읽은 텍스트"))
+
+    assert "[이미지 텍스트]\n수식 이미지에서 읽은 텍스트" in pages[0].text
+    assert pages[0].ocr_image_count == 1

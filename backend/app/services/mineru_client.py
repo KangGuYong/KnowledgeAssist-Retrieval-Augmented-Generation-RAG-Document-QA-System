@@ -5,7 +5,7 @@ docs/superpowers/specs/2026-08-31-mineru-pdf-parsing-design.md. This module
 only talks to the service and returns its content_list blocks plus their
 images (as base64 data URIs - MinerU 3.4.5's /file_parse embeds images
 inline rather than exposing a shared output directory, verified 2026-08-31).
-Page-grouping and text assembly live in build_pages() (added in the next task).
+Page-grouping and text assembly live in build_pages() below.
 """
 
 import hashlib
@@ -198,6 +198,21 @@ def _ocr_image_block(
     return result
 
 
+def _needs_ocr(block: dict) -> bool:
+    """True when a block has img_path but no usable structured text of its
+    own (table_body / equation text) - it needs PaddleOCR augmentation
+    rather than its own recognised content. A table or equation block whose
+    own recognition failed server-side (empty table_body/text) falls back
+    here instead of being silently dropped, since it still carries an
+    img_path screenshot per MinerU's schema.
+    """
+    if (block.get("table_body") or "").strip():
+        return False
+    if block.get("type") == "equation" and (block.get("text") or "").strip():
+        return False
+    return bool(block.get("img_path"))
+
+
 def build_pages(
     blocks: list,
     images: dict,
@@ -215,7 +230,7 @@ def build_pages(
     """
     by_page: dict = {}
     for block in blocks:
-        by_page.setdefault(block["page_idx"], []).append(block)
+        by_page.setdefault(block.get("page_idx", 0), []).append(block)
 
     cache: dict = {}
     pages = []
@@ -226,39 +241,32 @@ def build_pages(
         image_ids = []
 
         for block in page_blocks:
-            block_type = block.get("type")
-            if block_type in ("table", "equation"):
-                text = _text_of(block)
-                if text:
-                    parts.append(text)
-            elif block.get("img_path"):
-                # "image", "chart", and any other MinerU visual-figure
-                # subtype - anything with img_path that isn't a table/
-                # equation screenshot. Verified live 2026-08-31: MinerU
-                # emits type="chart" (not "image") for some figures, with
-                # the same img_path/text shape as an "image" block.
-                if ocr is None:
-                    continue
-                text, image_id = _ocr_image_block(block, images, ocr, cache, image_dir)
-                if not text:
-                    continue
-                ocr_image_count += 1
-                if image_id is not None:
-                    image_ids.append(image_id)
-                parts.append(_format_ocr_block(text))
-            else:
-                text = _text_of(block)
-                if text:
-                    parts.append(text)
+            try:
+                if _needs_ocr(block):
+                    if ocr is None:
+                        continue
+                    text, image_id = _ocr_image_block(block, images, ocr, cache, image_dir)
+                    if not text:
+                        continue
+                    ocr_image_count += 1
+                    if image_id is not None:
+                        image_ids.append(image_id)
+                    parts.append(_format_ocr_block(text))
+                else:
+                    text = _text_of(block)
+                    if text:
+                        parts.append(text)
+            except Exception as e:
+                logger.warning(
+                    "Failed to process a content block on page %s: %s", page_idx + 1, e
+                )
+                continue
 
         pages.append(
             PdfPage(
                 page_number=page_idx + 1,
                 text="\n\n".join(parts),
-                image_count=sum(
-                    1 for b in page_blocks
-                    if b.get("img_path") and b.get("type") not in ("table", "equation")
-                ),
+                image_count=sum(1 for b in page_blocks if _needs_ocr(b)),
                 ocr_image_count=ocr_image_count,
                 image_ids=image_ids,
             )
