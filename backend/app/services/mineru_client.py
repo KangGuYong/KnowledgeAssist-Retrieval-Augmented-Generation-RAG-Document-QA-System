@@ -173,10 +173,10 @@ def persist_block_image(block: dict, images: dict, image_dir: Path) -> Optional[
         return None
     try:
         raw = _decode_data_uri(_lookup_image(images, img_path))
-    except (KeyError, ValueError):
+        image = _bgr_array_from_bytes(raw)
+    except Exception:
         return None
     image_id = hashlib.md5(raw).hexdigest()[:16]
-    image = _bgr_array_from_bytes(raw)
     return image_id if _save_image(image, image_dir, image_id) else None
 
 
@@ -316,5 +316,8 @@ def parse_and_build_pages(
 
     result = client.parse_pdf(file_path)
     if on_parsed is not None:
-        on_parsed(result)
+        try:
+            on_parsed(result)
+        except Exception as e:
+            logger.warning("on_parsed callback failed: %s", e)
     return build_pages(result.blocks, result.images, ocr, image_dir)

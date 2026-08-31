@@ -447,6 +447,18 @@ def test_persist_block_image_returns_none_when_images_dict_missing_key(tmp_path)
     assert result is None
 
 
+def test_persist_block_image_returns_none_when_image_data_is_corrupted(tmp_path):
+    import base64
+
+    block = {"type": "image", "page_idx": 0, "img_path": "images/corrupt.png"}
+    corrupted_uri = "data:image/png;base64," + base64.b64encode(b"not a real png").decode()
+    images = {"images/corrupt.png": corrupted_uri}
+
+    result = persist_block_image(block, images, tmp_path / "saved")
+
+    assert result is None
+
+
 def test_on_parsed_callback_receives_raw_result_before_build_pages_consumes_it():
     images = {"images/img1.png": _png_data_uri()}
     blocks = [{"type": "text", "page_idx": 0, "text": "본문"}]
@@ -469,4 +481,20 @@ def test_on_parsed_defaults_to_none_and_is_optional():
 
     pages = parse_and_build_pages("ignored.pdf", ocr=None, client=client)
 
+    assert pages[0].text == "본문"
+
+
+def test_on_parsed_callback_exception_does_not_break_parsing():
+    images = {"images/img1.png": _png_data_uri()}
+    blocks = [{"type": "text", "page_idx": 0, "text": "본문"}]
+    client = FakeMineruClient(blocks, images)
+
+    def failing_callback(result):
+        raise ValueError("callback error")
+
+    pages = parse_and_build_pages(
+        "ignored.pdf", ocr=None, client=client, on_parsed=failing_callback
+    )
+
+    assert len(pages) == 1
     assert pages[0].text == "본문"
