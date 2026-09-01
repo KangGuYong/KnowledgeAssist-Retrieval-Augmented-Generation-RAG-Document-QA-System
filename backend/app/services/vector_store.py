@@ -14,10 +14,10 @@ settings = get_settings()
 @lru_cache()
 def get_embeddings():
     """Get cached embedding model."""
-    logger.info(f"Loading embedding model: {settings.embedding_model}")
+    logger.info(f"Loading embedding model: {settings.embedding_model} (device={settings.embedding_device})")
     return HuggingFaceEmbeddings(
         model_name=settings.embedding_model,
-        model_kwargs={'device': 'cpu'},
+        model_kwargs={'device': settings.embedding_device},
         encode_kwargs={'normalize_embeddings': True}
     )
 

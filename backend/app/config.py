@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Embeddings
     embedding_model: str = "nlpai-lab/KURE-v1"
+    embedding_device: str = "cuda"  # "cpu", "cuda", "cuda:0", ...
 
     # LLM Configuration
     llm_provider: str = "ollama"
