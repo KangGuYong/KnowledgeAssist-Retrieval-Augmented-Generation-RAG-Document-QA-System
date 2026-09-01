@@ -63,7 +63,14 @@ function ParsedBlockView({ documentId, block }: { documentId: string; block: Par
   return null;
 }
 
-export const ParsedDocumentViewer: React.FC = () => {
+interface ParsedDocumentViewerProps {
+  /** 문서 삭제가 성공했을 때 알려준다 - App.tsx의 채팅용 문서 선택 목록도
+   * 같이 갱신되어야 하기 때문 (그렇지 않으면 이미 삭제된 문서가 선택
+   * 목록에 그대로 남는다). */
+  onDocumentDeleted?: (documentId: string) => void;
+}
+
+export const ParsedDocumentViewer: React.FC<ParsedDocumentViewerProps> = ({ onDocumentDeleted }) => {
   const [documents, setDocuments] = useState<ParsedDocumentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ParsedDocumentDetail | null>(null);
@@ -89,6 +96,7 @@ export const ParsedDocumentViewer: React.FC = () => {
       if (selectedId === documentId) {
         setSelectedId(null);
       }
+      onDocumentDeleted?.(documentId);
     } catch (err) {
       setError((err as Error).message);
     } finally {
