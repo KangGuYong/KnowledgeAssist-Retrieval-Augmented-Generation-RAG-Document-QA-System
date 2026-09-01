@@ -64,26 +64,27 @@ function ParsedBlockView({ documentId, block }: { documentId: string; block: Par
 }
 
 interface ParsedDocumentViewerProps {
-  /** 문서 삭제가 성공했을 때 알려준다 - App.tsx의 채팅용 문서 선택 목록도
-   * 같이 갱신되어야 하기 때문 (그렇지 않으면 이미 삭제된 문서가 선택
-   * 목록에 그대로 남는다). */
-  onDocumentDeleted?: (documentId: string) => void;
+  /** 파싱된 문서 목록 - App.tsx가 단일 소스로 들고 있다. 뷰어가 목록을
+   * 따로 받아오면 업로드/삭제로 갱신되는 App의 목록과 어긋나서, 방금
+   * 올린 문서가 뷰어에 나타나지 않는다. */
+  documents: ParsedDocumentSummary[];
+  /** 목록을 불러오지 못했을 때의 메시지 */
+  loadError?: string | null;
+  /** 문서 삭제가 성공했을 때 알려준다 - 목록과 채팅용 선택 상태를 모두
+   * 들고 있는 App.tsx가 갱신을 처리한다. */
+  onDocumentDeleted: (documentId: string) => void;
 }
 
-export const ParsedDocumentViewer: React.FC<ParsedDocumentViewerProps> = ({ onDocumentDeleted }) => {
-  const [documents, setDocuments] = useState<ParsedDocumentSummary[]>([]);
+export const ParsedDocumentViewer: React.FC<ParsedDocumentViewerProps> = ({
+  documents,
+  loadError,
+  onDocumentDeleted,
+}) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ParsedDocumentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiService
-      .getParsedDocuments()
-      .then(setDocuments)
-      .catch((err: Error) => setError(err.message));
-  }, []);
 
   const handleDelete = async (e: React.MouseEvent, documentId: string, filename: string) => {
     e.stopPropagation();
@@ -92,11 +93,10 @@ export const ParsedDocumentViewer: React.FC<ParsedDocumentViewerProps> = ({ onDo
     setDeletingId(documentId);
     try {
       await apiService.deleteDocument(documentId);
-      setDocuments((prev) => prev.filter((doc) => doc.document_id !== documentId));
       if (selectedId === documentId) {
         setSelectedId(null);
       }
-      onDocumentDeleted?.(documentId);
+      onDocumentDeleted(documentId);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -148,7 +148,7 @@ export const ParsedDocumentViewer: React.FC<ParsedDocumentViewerProps> = ({ onDo
       </div>
 
       <div className="parsed-viewer-content">
-        {error && <p className="parsed-viewer-error">{error}</p>}
+        {(error ?? loadError) && <p className="parsed-viewer-error">{error ?? loadError}</p>}
         {loading && <p>불러오는 중...</p>}
         {!loading && !error && !detail && <p className="parsed-viewer-empty">왼쪽에서 문서를 선택하세요.</p>}
         {detail &&

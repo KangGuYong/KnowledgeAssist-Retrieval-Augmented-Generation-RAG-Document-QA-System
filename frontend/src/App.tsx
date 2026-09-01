@@ -10,7 +10,10 @@ import './styles/App.css';
 type ActiveTab = 'chat' | 'viewer';
 
 function App() {
+  // 파싱된 문서 목록은 여기 한 곳에서만 관리한다 - 채팅 선택 목록과 문서
+  // 뷰어가 각자 목록을 받아오면 업로드/삭제 후 서로 어긋나기 때문.
   const [documents, setDocuments] = useState<ParsedDocumentSummary[]>([]);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat');
@@ -20,6 +23,7 @@ function App() {
       .getParsedDocuments()
       .then((list) => {
         setDocuments(list);
+        setDocumentsError(null);
         // 처음 목록을 불러올 때만 전체 선택으로 초기화한다 - 이후 재조회
         // (업로드/삭제)에서는 사용자가 직접 고른 선택을 덮어쓰지 않는다.
         if (!hasInitializedSelection) {
@@ -27,7 +31,10 @@ function App() {
           setHasInitializedSelection(true);
         }
       })
-      .catch((err: Error) => console.error('Failed to load documents:', err.message));
+      .catch((err: Error) => {
+        setDocumentsError(err.message);
+        console.error('Failed to load documents:', err.message);
+      });
   };
 
   useEffect(() => {
@@ -92,7 +99,11 @@ function App() {
           <ChatWindow documentIds={selectedDocumentIds} />
         </div>
         <div className="app-main-full" hidden={activeTab !== 'viewer'}>
-          <ParsedDocumentViewer onDocumentDeleted={handleDocumentDeleted} />
+          <ParsedDocumentViewer
+            documents={documents}
+            loadError={documentsError}
+            onDocumentDeleted={handleDocumentDeleted}
+          />
         </div>
       </main>
     </div>
