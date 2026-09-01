@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 from pathlib import Path
 import aiofiles
 import re
+import time
 import uuid
 import logging
 from typing import List, Optional
@@ -114,6 +115,7 @@ async def _process_upload(
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = upload_dir / f"{document_id}_{file.filename}"
+    total_start = time.perf_counter()
 
     try:
         # Save uploaded file
@@ -134,7 +136,17 @@ async def _process_upload(
         )
 
         # Add to vector store
+        embed_start = time.perf_counter()
         vector_service.add_documents(chunks, document_id)
+        logger.info(
+            "[TIMING] Embedding + vector store: %.2fs, %d chunk(s) - %s",
+            time.perf_counter() - embed_start, len(chunks), file.filename,
+        )
+
+        logger.info(
+            "[TIMING] Total upload processing: %.2fs - %s (%s)",
+            time.perf_counter() - total_start, file.filename, document_id,
+        )
 
         return UploadResponse(
             document_id=document_id,

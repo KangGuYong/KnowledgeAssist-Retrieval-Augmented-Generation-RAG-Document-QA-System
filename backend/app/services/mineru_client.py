@@ -11,6 +11,7 @@ Page-grouping and text assembly live in build_pages() below.
 import hashlib
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
@@ -56,6 +57,7 @@ class MineruClient:
         way the caller decides whether to fall back (see
         document_processor.load_pdf).
         """
+        start = time.perf_counter()
         with httpx.Client(
             base_url=self.base_url, timeout=self.timeout, transport=self._transport
         ) as client:
@@ -71,6 +73,11 @@ class MineruClient:
                         "return_md": "false",
                     },
                 )
+        logger.info(
+            "[TIMING] MinerU /file_parse: %.2fs (file=%s)",
+            time.perf_counter() - start,
+            Path(file_path).name,
+        )
         response.raise_for_status()
         payload = response.json()
 
@@ -254,6 +261,9 @@ def build_pages(
 
     cache: dict = {}
     pages = []
+    ocr_seconds = 0.0
+    ocr_calls = 0
+    build_start = time.perf_counter()
     for page_idx in sorted(by_page):
         page_blocks = by_page[page_idx]
         parts = []
@@ -265,7 +275,10 @@ def build_pages(
                 if _needs_ocr(block):
                     if ocr is None:
                         continue
+                    ocr_start = time.perf_counter()
                     text, image_id = _ocr_image_block(block, images, ocr, cache, image_dir)
+                    ocr_seconds += time.perf_counter() - ocr_start
+                    ocr_calls += 1
                     if not text:
                         continue
                     ocr_image_count += 1
@@ -292,6 +305,12 @@ def build_pages(
             )
         )
 
+    logger.info(
+        "[TIMING] build_pages: %.2fs total, of which OCR %.2fs across %d image block(s)",
+        time.perf_counter() - build_start,
+        ocr_seconds,
+        ocr_calls,
+    )
     return pages
 
 

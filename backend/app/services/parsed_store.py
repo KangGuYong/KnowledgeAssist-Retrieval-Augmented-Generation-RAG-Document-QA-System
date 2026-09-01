@@ -8,6 +8,7 @@ must never break the upload/parsing pipeline, so save() never raises.
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,8 +27,13 @@ def save(document_id: str, filename: str, result: MineruResult, image_dir: Path)
     block) is logged and swallowed so it can never break the caller's
     upload/parsing flow.
     """
+    start = time.perf_counter()
     try:
         _save(document_id, filename, result, image_dir)
+        logger.info(
+            "[TIMING] parsed_store.save: %.2fs (%s, %s)",
+            time.perf_counter() - start, filename, document_id,
+        )
     except Exception as e:
         logger.warning(
             "Failed to persist parsed result for %s (%s): %s", filename, document_id, e
