@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     max_upload_size: int = 10 * 1024 * 1024  # 10MB
     allowed_extensions: set[str] = {".pdf", ".txt", ".docx"}
     upload_dir: str = "app/storage/uploads"
+    max_documents: int = 10  # Total documents allowed in the system at once
 
     # Vector Store
     chroma_persist_dir: str = "app/storage/chroma_db"
