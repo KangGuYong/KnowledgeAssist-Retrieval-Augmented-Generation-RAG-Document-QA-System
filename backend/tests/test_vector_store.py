@@ -1,17 +1,18 @@
 """VectorStoreService.delete_by_document_id must actually delete.
 
-Regression found while smoke-testing the langchain 0.1.20/langchain-community
-0.0.38 bump (see commit "bump langchain to add langchain-experimental"):
-Chroma.delete() in langchain-community 0.0.38 only forwards `ids=` to the
-underlying chromadb collection and silently drops `where=` into an unused
-**kwargs, so `delete(where={"document_id": ...})` raised "You must provide
-either ids, where, or where_document to delete." on every call. Confirmed via
-a real Chroma instance (FakeEmbeddings, no network/model), not a mock, since
-the bug lives in the third-party wrapper's plumbing.
+Runs against a real Chroma instance (FakeEmbeddings, no network/model) rather
+than a mock, because what this guards lives in the third-party wrapper's
+plumbing: whether Chroma.delete() forwards `where=` to the underlying chromadb
+collection at all. langchain-community 0.0.38 did not - it passed only `ids=`
+and dropped the rest, so every delete raised "You must provide either ids,
+where, or where_document to delete." That regression was found while
+smoke-testing the 0.1.20/0.0.38 bump and worked around by calling
+`_collection` directly; 0.4.2 forwards **kwargs, so the workaround is gone and
+this test is what keeps its removal honest.
 """
 
 import pytest
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_core.embeddings import FakeEmbeddings
 

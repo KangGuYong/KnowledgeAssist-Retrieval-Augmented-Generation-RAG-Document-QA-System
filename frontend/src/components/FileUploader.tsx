@@ -6,6 +6,9 @@ import { UploadedFile } from '../types/chat.types';
 import { ChunkingStrategy, UploadOptions } from '../types/api.types';
 import '../styles/FileUploader.css';
 
+// 이보다 긴 파일명은 목록에서 잘라 표시한다.
+const MAX_FILE_NAME_LENGTH = 15;
+
 interface FileUploaderProps {
   onUploadComplete?: (documentIds: string[]) => void;
   maxFiles?: number;
@@ -119,6 +122,13 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
+  // 목록 한 줄에 파일명이 길게 흐르지 않도록 자른다. 잘린 이름만으로는 어떤
+  // 문서인지 알 수 없으므로, 전체 이름은 title로 남겨 hover에서 보이게 한다.
+  const truncateFileName = (name: string): string =>
+    name.length > MAX_FILE_NAME_LENGTH
+      ? `${name.slice(0, MAX_FILE_NAME_LENGTH)}...`
+      : name;
+
   return (
     <div className="file-uploader">
       <div className="upload-options">
@@ -201,7 +211,9 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
               <div className="file-info">
                 <FileText className="file-icon" size={20} />
                 <div className="file-details">
-                  <span className="file-name">{file.name}</span>
+                  <span className="file-name" title={file.name}>
+                    {truncateFileName(file.name)}
+                  </span>
                   <span className="file-meta">
                     {formatFileSize(file.size)}
                     {file.numChunks && ` • ${file.numChunks} chunks`}

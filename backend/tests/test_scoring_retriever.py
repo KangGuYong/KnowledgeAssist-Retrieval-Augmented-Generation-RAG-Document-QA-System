@@ -1,7 +1,7 @@
 """ScoringRetriever must expose the similarity score that as_retriever() drops."""
 
 import pytest
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from app.services.rag_service import ScoringRetriever
 
@@ -26,7 +26,7 @@ def test_relevance_score_is_stashed_in_document_metadata():
     # 이 테스트의 관심사는 점수 부착이지 순서가 아니다. 재배치를 끄고 격리한다.
     retriever = ScoringRetriever(vector_store=store, k=4, reorder=False)
 
-    docs = retriever.get_relevant_documents("생활SOC 확충 계획")
+    docs = retriever.invoke("생활SOC 확충 계획")
 
     assert [d.metadata["similarity_score"] for d in docs] == [0.91, 0.42]
     assert [d.page_content for d in docs] == ["a", "b"]
@@ -38,7 +38,7 @@ def test_query_k_and_filter_are_forwarded_to_the_vector_store():
         vector_store=store, k=7, search_filter={"document_id": {"$in": ["doc_1"]}}
     )
 
-    retriever.get_relevant_documents("질문")
+    retriever.invoke("질문")
 
     assert store.calls == [
         {"query": "질문", "k": 7, "filter": {"document_id": {"$in": ["doc_1"]}}}
@@ -49,7 +49,7 @@ def test_no_filter_passes_none_through():
     store = FakeVectorStore([])
     retriever = ScoringRetriever(vector_store=store, k=4)
 
-    retriever.get_relevant_documents("질문")
+    retriever.invoke("질문")
 
     assert store.calls[0]["filter"] is None
 
@@ -76,7 +76,7 @@ def test_reordering_moves_the_best_chunks_to_the_edges(k, expected):
     ])
     retriever = ScoringRetriever(vector_store=store, k=k)
 
-    docs = retriever.get_relevant_documents("질문")
+    docs = retriever.invoke("질문")
 
     assert [d.page_content for d in docs] == expected
 
@@ -90,7 +90,7 @@ def test_scores_survive_the_reordering():
     ])
     retriever = ScoringRetriever(vector_store=store, k=3)
 
-    docs = retriever.get_relevant_documents("질문")
+    docs = retriever.invoke("질문")
     by_content = {d.page_content: d.metadata["similarity_score"] for d in docs}
 
     assert by_content == {"a": 0.91, "b": 0.42, "c": 0.30}
@@ -103,7 +103,7 @@ def test_reorder_can_be_turned_off():
     ])
     retriever = ScoringRetriever(vector_store=store, k=2, reorder=False)
 
-    docs = retriever.get_relevant_documents("질문")
+    docs = retriever.invoke("질문")
 
     assert [d.page_content for d in docs] == ["a", "b"]
 
@@ -111,7 +111,7 @@ def test_reorder_can_be_turned_off():
 def test_empty_search_result_does_not_blow_up():
     retriever = ScoringRetriever(vector_store=FakeVectorStore([]), k=10)
 
-    assert retriever.get_relevant_documents("질문") == []
+    assert retriever.invoke("질문") == []
 
 
 @pytest.mark.parametrize("configured", [True, False])
@@ -126,30 +126,35 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
     import app.services.rag_service as rag_module
     from app.services.rag_service import RAGService
 
+    from langchain_core.messages import AIMessage
+    from langchain_core.runnables import RunnableLambda
+
     captured = {}
+    real_retriever_cls = rag_module.ScoringRetriever
 
-    class FakeChain:
-        def __call__(self, inputs):
-            return {"answer": "ok", "source_documents": []}
+    def spy(**kwargs):
+        # 진짜 리트리버를 만들되 참조를 붙잡아 둔다. 대역으로 갈아끼우면
+        # 필드가 실제로 유효한 값인지는 검사하지 못한다.
+        captured["retriever"] = real_retriever_cls(**kwargs)
+        return captured["retriever"]
 
-    def fake_from_llm(llm, retriever, **kwargs):
-        captured["retriever"] = retriever
-        return FakeChain()
-
-    monkeypatch.setattr(
-        rag_module.ConversationalRetrievalChain, "from_llm", staticmethod(fake_from_llm)
-    )
+    monkeypatch.setattr(rag_module, "ScoringRetriever", spy)
     # 실제 Settings 대신 필요한 두 값만 가진 대역으로 갈아끼운다.
     monkeypatch.setattr(
         rag_module, "settings",
-        SimpleNamespace(retrieval_k=10, retrieval_reorder=configured),
+        SimpleNamespace(
+            retrieval_k=10,
+            retrieval_reorder=configured,
+            ocr_block_prefix="[이미지 텍스트]",
+            llm_max_attempts=1,
+        ),
     )
 
     # __init__은 임베딩 모델과 Ollama 연결을 요구하므로 우회한다.
     service = RAGService.__new__(RAGService)
     service.vector_store = FakeVectorStore([])
-    service.llm = object()
-    service.conversation_memories = {}
+    service.llm = RunnableLambda(lambda _: AIMessage(content="ok"))
+    service.conversation_histories = {}
 
     asyncio.run(service.ask_question("질문"))
 

@@ -14,9 +14,9 @@ import re
 from typing import Any, List, Optional, Protocol
 
 import numpy as np
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import get_settings
 

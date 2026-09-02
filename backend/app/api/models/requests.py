@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 
@@ -8,14 +8,15 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="Conversation ID for context")
     document_ids: Optional[list[str]] = Field(None, description="Specific documents to query")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "question": "What are the main topics discussed in the document?",
                 "conversation_id": "conv_123",
                 "document_ids": ["doc_abc", "doc_xyz"]
             }
         }
+    )
 
 
 class ConversationCreate(BaseModel):
