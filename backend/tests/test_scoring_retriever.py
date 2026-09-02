@@ -126,19 +126,19 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
     import app.services.rag_service as rag_module
     from app.services.rag_service import RAGService
 
+    from langchain_core.messages import AIMessage
+    from langchain_core.runnables import RunnableLambda
+
     captured = {}
+    real_retriever_cls = rag_module.ScoringRetriever
 
-    class FakeChain:
-        def __call__(self, inputs):
-            return {"answer": "ok", "source_documents": []}
+    def spy(**kwargs):
+        # 진짜 리트리버를 만들되 참조를 붙잡아 둔다. 대역으로 갈아끼우면
+        # 필드가 실제로 유효한 값인지는 검사하지 못한다.
+        captured["retriever"] = real_retriever_cls(**kwargs)
+        return captured["retriever"]
 
-    def fake_from_llm(llm, retriever, **kwargs):
-        captured["retriever"] = retriever
-        return FakeChain()
-
-    monkeypatch.setattr(
-        rag_module.ConversationalRetrievalChain, "from_llm", staticmethod(fake_from_llm)
-    )
+    monkeypatch.setattr(rag_module, "ScoringRetriever", spy)
     # 실제 Settings 대신 필요한 두 값만 가진 대역으로 갈아끼운다.
     monkeypatch.setattr(
         rag_module, "settings",
@@ -148,8 +148,8 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
     # __init__은 임베딩 모델과 Ollama 연결을 요구하므로 우회한다.
     service = RAGService.__new__(RAGService)
     service.vector_store = FakeVectorStore([])
-    service.llm = object()
-    service.conversation_memories = {}
+    service.llm = RunnableLambda(lambda _: AIMessage(content="ok"))
+    service.conversation_histories = {}
 
     asyncio.run(service.ask_question("질문"))
 

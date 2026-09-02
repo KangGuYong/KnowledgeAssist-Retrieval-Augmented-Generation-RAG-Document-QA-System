@@ -17,9 +17,9 @@ pydantic-settings==2.15.0
 #
 # ChatOllama는 langchain-community 0.4.2에서 빠져 langchain-ollama로 이관됐다.
 # 전이 의존성으로 langchain-core 1.6.1, langchain-text-splitters 1.1.2,
-# langgraph 1.2.11, langchain-classic 1.0.8이 함께 들어온다. langchain-classic은
-# 아직 남은 ConversationalRetrievalChain/ConversationBufferMemory를 위한 한시적
-# 발판이며, LCEL 재작성(2단계)에서 걷어낸다.
+# langgraph 1.2.11, langchain-classic 1.0.8이 함께 들어온다. 이 중 우리 코드가
+# import하는 것은 없다 - langchain-classic은 LCEL 재작성(2단계)으로 걷어냈고,
+# langchain-community가 계속 끌고 오는 전이 패키지로만 남는다.
 #
 # 시멘틱 청킹은 "5 Levels of Text Splitting" 노트북을 직접 포팅한 것이라
 # (app/services/chunking.py) langchain-experimental은 여전히 의존성이 아니다.

@@ -1,8 +1,8 @@
-from langchain_classic.chains import ConversationalRetrievalChain
-from langchain_classic.memory import ConversationBufferMemory
 from langchain_community.document_transformers import LongContextReorder
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_ollama import ChatOllama
@@ -22,6 +22,13 @@ settings = get_settings()
 # 요청마다 새로 만들 이유가 없다.
 _LONG_CONTEXT_REORDER = LongContextReorder()
 
+# 컨텍스트는 청크의 page_content만 빈 줄로 이어붙인 것이다. 문서명·페이지 같은
+# 메타데이터는 들어가지 않는다. StuffDocumentsChain이 쓰던 기본값과 같다.
+_DOCUMENT_SEPARATOR = "\n\n"
+
+# ConversationalRetrievalChain._get_chat_history가 쓰던 역할 접두다.
+_ROLE_PREFIXES = {"human": "Human: ", "ai": "Assistant: "}
+
 # 문맥 중 '[이미지 텍스트]'는 OCR로 추출된 것이라 오탈자가 있을 수 있다. 청크
 # 본문에 이미 인라인으로 박혀 있으므로(mineru_client._format_ocr_block), 여기서는 LLM에게
 # 그 마커를 어떻게 다뤄야 하는지만 알려준다.
@@ -40,6 +47,7 @@ QA_PROMPT = PromptTemplate(
 2. **출처 인용**: 답변에 사용한 정보의 출처를 [출처: 문서명] 형식으로 표시하세요.
 3. **불확실성 표현**: 정보가 불완전하면 "~로 추정됩니다" 등으로 표현하세요.
 4. **없는 정보**: 컨텍스트에 없는 정보는 "제공된 문서에서 해당 정보를 찾을 수 없습니다"라고 명시하세요.
+5. **검색된 문서 없음**: 검색된 문서가 없다면 사용자 질문에 성실하게 답을 하세요.
 
 ## 사용자 질문
 {question}
@@ -47,6 +55,40 @@ QA_PROMPT = PromptTemplate(
 위 규칙을 따라 답변하세요:""",
     input_variables=["context", "question"],
 )
+
+# ConversationalRetrievalChain이 쓰던 기본 프롬프트를 그대로 옮겨 왔다
+# (langchain_classic/chains/conversational_retrieval/prompts.py). 영어 지시문이지만
+# "in its original language" 덕분에 한국어 질문은 한국어로 재작성된다. 검토된 적 없는
+# 서드파티 기본값이었고, 이제는 우리 것이라 바꾸려면 커밋이 필요하다.
+CONDENSE_PROMPT = PromptTemplate.from_template(
+    """Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question, in its original language.
+
+Chat History:
+{chat_history}
+Follow Up Input: {question}
+Standalone question:"""
+)
+
+
+def _format_chat_history(messages: List[BaseMessage]) -> str:
+    """대화 이력을 condense 프롬프트에 넣을 한 덩어리 문자열로 접는다.
+
+    ConversationalRetrievalChain._get_chat_history의 동작을 그대로 옮겼다.
+    턴마다 앞에 개행과 역할 접두를 붙이고, 내용이 빈 메시지는 건너뛴다.
+    첫 턴 앞의 개행까지 같아야 프롬프트가 이전과 동일해진다.
+    """
+    buffer = ""
+    for message in messages:
+        if not message.content:
+            continue
+        prefix = _ROLE_PREFIXES.get(message.type, f"{message.type}: ")
+        buffer += f"\n{prefix}{message.content}"
+    return buffer
+
+
+def _format_context(docs: List[Document]) -> str:
+    """검색된 청크를 컨텍스트 문자열로 조립한다."""
+    return _DOCUMENT_SEPARATOR.join(doc.page_content for doc in docs)
 
 
 class ScoringRetriever(BaseRetriever):
@@ -91,8 +133,9 @@ class RAGService:
     def __init__(self):
         self.vector_store = get_vector_store()
         self.llm = self._initialize_llm()
-        # Store conversation memories by conversation_id
-        self.conversation_memories: Dict[str, ConversationBufferMemory] = {}
+        # conversation_id -> 그 대화의 메시지 목록. 프로세스가 재시작되면 전부
+        # 사라지고, 워커를 여러 개 띄우면 공유되지 않는다.
+        self.conversation_histories: Dict[str, List[BaseMessage]] = {}
 
     def _initialize_llm(self):
         """Initialize the LLM based on provider setting."""
@@ -105,15 +148,23 @@ class RAGService:
             temperature=settings.llm_temperature,
         )
 
-    def _get_or_create_memory(self, conversation_id: str) -> ConversationBufferMemory:
-        """Get existing conversation memory or create new one."""
-        if conversation_id not in self.conversation_memories:
-            self.conversation_memories[conversation_id] = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True,
-                output_key="answer"
-            )
-        return self.conversation_memories[conversation_id]
+    async def _condense_question(
+        self, question: str, history: List[BaseMessage]
+    ) -> str:
+        """후속 질문을 대화 맥락 없이도 검색 가능한 독립 질문으로 바꾼다.
+
+        첫 질문이면 이력이 비어 있으므로 LLM을 부르지 않고 원 질문을 그대로
+        돌려준다. 이 단락(short-circuit)은 요청당 LLM 호출 수를 결정하므로
+        동작 명세의 일부다.
+        """
+        chat_history = _format_chat_history(history)
+        if not chat_history:
+            return question
+
+        chain = CONDENSE_PROMPT | self.llm | StrOutputParser()
+        return await chain.ainvoke(
+            {"chat_history": chat_history, "question": question}
+        )
 
     async def ask_question(
         self,
@@ -136,48 +187,46 @@ class RAGService:
         if not conversation_id:
             conversation_id = f"conv_{uuid.uuid4().hex[:12]}"
 
-        # Get or create conversation memory
-        memory = self._get_or_create_memory(conversation_id)
+        history = self.conversation_histories.setdefault(conversation_id, [])
 
         # Set up retriever with optional document filtering
-        search_kwargs = {"k": settings.retrieval_k}
-        if document_ids:
-            search_kwargs["filter"] = {"document_id": {"$in": document_ids}}
-
+        search_filter = {"document_id": {"$in": document_ids}} if document_ids else None
         retriever = ScoringRetriever(
             vector_store=self.vector_store,
-            k=search_kwargs["k"],
-            search_filter=search_kwargs.get("filter"),
+            k=settings.retrieval_k,
+            search_filter=search_filter,
             reorder=settings.retrieval_reorder,
         )
 
-        # Create conversational chain
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=self.llm,
-            retriever=retriever,
-            memory=memory,
-            return_source_documents=True,
-            combine_docs_chain_kwargs={"prompt": QA_PROMPT},
-            verbose=True
-        )
-
-        # Get response
         try:
-            result = qa_chain({"question": question})
+            standalone_question = await self._condense_question(question, history)
+            if standalone_question != question:
+                logger.debug("Condensed question: %s", standalone_question)
 
-            # Format source documents
-            sources = self._format_sources(result.get("source_documents", []))
+            # 검색도 답변도 재작성된 질문으로 한다. QA_PROMPT의 {question}에
+            # 원 질문이 아니라 이 질문이 들어가는 것은
+            # ConversationalRetrievalChain의 rephrase_question=True 기본값과 같다.
+            docs = await retriever.ainvoke(standalone_question)
 
-            return {
-                "answer": result["answer"],
-                "sources": sources,
-                "conversation_id": conversation_id,
-                "message_id": f"msg_{uuid.uuid4().hex[:12]}"
-            }
+            answer_chain = QA_PROMPT | self.llm | StrOutputParser()
+            answer = await answer_chain.ainvoke(
+                {"context": _format_context(docs), "question": standalone_question}
+            )
 
         except Exception as e:
             logger.error(f"Error in RAG pipeline: {e}")
             raise
+
+        # 실패한 턴은 이력에 남기지 않는다. 체인이 메모리를 저장하던 시점과 같다.
+        history.append(HumanMessage(content=question))
+        history.append(AIMessage(content=answer))
+
+        return {
+            "answer": answer,
+            "sources": self._format_sources(docs),
+            "conversation_id": conversation_id,
+            "message_id": f"msg_{uuid.uuid4().hex[:12]}"
+        }
 
     def _format_sources(self, source_docs: list) -> list[SourceDocument]:
         """Format source documents for response.
@@ -224,6 +273,6 @@ class RAGService:
 
     def clear_conversation(self, conversation_id: str) -> None:
         """Clear conversation history."""
-        if conversation_id in self.conversation_memories:
-            del self.conversation_memories[conversation_id]
+        if conversation_id in self.conversation_histories:
+            del self.conversation_histories[conversation_id]
             logger.info(f"Cleared conversation {conversation_id}")
