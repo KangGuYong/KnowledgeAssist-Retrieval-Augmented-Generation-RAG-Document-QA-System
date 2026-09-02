@@ -59,8 +59,9 @@ question + conversation history
 | Area | Technology | Version |
 |---|---|---|
 | Web framework | FastAPI + Uvicorn | 0.109.0 / 0.27.0 |
-| Settings & validation | Pydantic / pydantic-settings | 2.5.0 / 2.1.0 |
-| RAG orchestration | LangChain / langchain-community | 0.1.20 / 0.0.38 |
+| Settings & validation | Pydantic / pydantic-settings | 2.13.5 / 2.15.0 |
+| RAG orchestration | LangChain / langchain-community | 1.3.18 / 0.4.2 |
+| LLM client | langchain-ollama | 1.1.0 |
 | Vector store | ChromaDB | 0.4.22 |
 | Embeddings | sentence-transformers + `nlpai-lab/KURE-v1` | 3.3.1 |
 | LLM | Ollama (`gemma4:26b-a4b-it-q4_K_M`) | — |
@@ -71,6 +72,11 @@ question + conversation history
 
 Semantic chunking is a direct port of the "5 Levels of Text Splitting" notebook
 (Level 4) rather than `langchain-experimental`, which is therefore not a dependency.
+
+`langchain-classic` is not imported by this project. It holds the legacy chains
+LangChain 1.x dropped from the main package and served as a migration foothold;
+the LCEL rewrite removed it, and it now only rides along as a transitive
+dependency of `langchain-community`.
 
 ### Frontend
 

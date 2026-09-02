@@ -2,16 +2,30 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# LangChain 1.x 마이그레이션 0단계로 먼저 올린다(docs/superpowers/specs/
+# 2026-09-02-langchain-1x-migration-design.md). langchain 1.3.18은 pydantic>=2.7.4를,
+# langchain-community 0.4.2는 pydantic-settings>=2.10.1을 요구하는데, 이 범프가
+# LangChain 자체보다 파급면이 넓어(설정 로딩, 응답 모델, FastAPI 호환) 별도 커밋으로
+# 분리했다. fastapi 0.109.0은 pydantic<3.0.0을 허용하므로 그대로 둔다.
+pydantic==2.13.5
+pydantic-settings==2.15.0
 
 # RAG Pipeline
-# langchain/langchain-community bumped from 0.1.0/0.0.10 to 0.1.20/0.0.38,
-# still within the 0.1.x/0.0.x line. Semantic chunking is a direct port of
-# the "5 Levels of Text Splitting" notebook (app/services/chunking.py) rather
-# than langchain-experimental, so that package isn't a dependency here.
-langchain==0.1.20
-langchain-community==0.0.38
+# LangChain 1.x. 0.1.x 라인은 langchain 0.1.20(2024-05-10)에서 멈췄고, 그 라인을
+# 붙잡던 이유(langchain-experimental 호환)는 4e9269c에서 이미 사라졌다. 경로 비교와
+# 근거는 docs/superpowers/specs/2026-09-02-langchain-1x-migration-design.md.
+#
+# ChatOllama는 langchain-community 0.4.2에서 빠져 langchain-ollama로 이관됐다.
+# 전이 의존성으로 langchain-core 1.6.1, langchain-text-splitters 1.1.2,
+# langgraph 1.2.11, langchain-classic 1.0.8이 함께 들어온다. 이 중 우리 코드가
+# import하는 것은 없다 - langchain-classic은 LCEL 재작성(2단계)으로 걷어냈고,
+# langchain-community가 계속 끌고 오는 전이 패키지로만 남는다.
+#
+# 시멘틱 청킹은 "5 Levels of Text Splitting" 노트북을 직접 포팅한 것이라
+# (app/services/chunking.py) langchain-experimental은 여전히 의존성이 아니다.
+langchain==1.3.18
+langchain-community==0.4.2
+langchain-ollama==1.1.0
 chromadb==0.4.22
 sentence-transformers==3.3.1
 
@@ -21,18 +35,31 @@ python-docx==1.1.0
 tiktoken==0.5.2
 
 # OCR (replaces PDF image regions with text)
-# 3.2.2 is the newest paddlepaddle with Linux aarch64 wheels on PyPI; 3.3.x
-# publishes those only on PaddlePaddle's own index. For the CUDA build (or a
-# newer version on aarch64), install paddle separately from:
+# paddlepaddle is held at 3.0.0 because every later release segfaults on this
+# aarch64 host. The crash is in AnalysisPredictor::SaveOrLoadPirParameters
+# while building the detection predictor, and it needs `import paddlex` to have
+# happened first - paddle.inference loads the very same model files fine in a
+# process that has not imported it. Verified against the cp312/aarch64 wheels:
+# 3.2.2, 3.2.1, 3.1.1 and 3.1.0 all segfault, 3.0.0 does not.
+#
+# 3.3.x publishes aarch64 wheels only on PaddlePaddle's own index. For a CUDA
+# build (these are CPU-only), install paddle separately from:
 #   https://www.paddlepaddle.org.cn/packages/stable/cpu/
-paddlepaddle==3.2.2
+paddlepaddle==3.0.0
 paddleocr==3.7.0
+# paddlex arrives through paddleocr and was previously unpinned, so it could
+# move on its own; pinned because it is the package whose import triggers the
+# crash above.
+paddlex==3.7.2
 PyMuPDF==1.28.2
 
 # Utilities
 python-dotenv==1.0.0
 aiofiles==23.2.1
-httpx==0.26.0
+# langchain-ollama가 끌고 오는 ollama 0.6.2가 httpx>=0.27을 요구해 0.26.0에서 올렸다.
+# mineru_client는 httpx.Client(base_url/timeout/transport)와 post(files=, data=)만
+# 쓰므로 0.28의 파괴적 변경(proxies=/app= 인자 제거)에 걸리지 않는다.
+httpx==0.28.1
 
 # Development
 pytest==7.4.4

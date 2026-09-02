@@ -7,8 +7,8 @@ notebook's own algorithm, not just "does it run".
 """
 
 import pytest
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from langchain_core.embeddings import FakeEmbeddings
 
 from app.services.chunking import SemanticChunker, _combine_sentences, _cosine_distances, build_splitter

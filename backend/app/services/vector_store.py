@@ -1,6 +1,6 @@
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.schema import Document
+from langchain_core.documents import Document
 from typing import Optional
 import logging
 from functools import lru_cache
@@ -110,12 +110,10 @@ class VectorStoreService:
     def delete_by_document_id(self, document_id: str) -> None:
         """Delete all chunks for a specific document.
 
-        langchain_community.vectorstores.chroma.Chroma.delete() (as of 0.0.38)
-        only forwards `ids=` to the underlying chromadb collection and drops
-        `where=` into an unused **kwargs, so `self.vector_store.delete(where=...)`
-        silently does nothing until chromadb itself raises "You must provide
-        either ids, where, or where_document to delete." Call the underlying
-        collection directly, which still supports `where=` fully.
+        Chroma.delete() forwards **kwargs straight to the underlying chromadb
+        collection, so `where=` works. It did not in langchain-community
+        0.0.38, which passed only `ids=` and dropped the rest - hence the
+        `_collection` call this replaces.
         """
-        self.vector_store._collection.delete(where={"document_id": document_id})
+        self.vector_store.delete(where={"document_id": document_id})
         logger.info(f"Deleted chunks for document {document_id}")
