@@ -58,7 +58,11 @@ def build_service(monkeypatch, llm, results=(), reorder=False):
     """__init__ 없이 RAGService를 세운다(임베딩 모델·Ollama 연결 회피)."""
     monkeypatch.setattr(
         rag_module, "settings",
-        SimpleNamespace(retrieval_k=5, retrieval_reorder=reorder),
+        SimpleNamespace(
+            retrieval_k=5,
+            retrieval_reorder=reorder,
+            ocr_block_prefix="[이미지 텍스트]",
+        ),
     )
     service = RAGService.__new__(RAGService)
     service.vector_store = FakeVectorStore(list(results))
@@ -183,3 +187,28 @@ def test_a_failed_turn_is_not_written_to_history(monkeypatch):
         asyncio.run(service.ask_question("질문", conversation_id="c1"))
 
     assert service.conversation_histories["c1"] == []
+
+
+@pytest.mark.parametrize(
+    "chunk_text, notice_expected",
+    [
+        ("표 안의 값은 [이미지 텍스트] 3,200억 원", True),
+        ("도표가 섞이지 않은 평범한 본문", False),
+    ],
+)
+def test_ocr_notice_rides_along_only_when_the_context_has_the_marker(
+    monkeypatch, chunk_text, notice_expected
+):
+    """OCR 주의문은 컨텍스트에 마커가 있을 때만 붙는다.
+
+    항상 붙이면 도표와 무관한 답변에서도 "도표를 직접 확인하라"는 헤지가 따라붙고,
+    매 요청 토큰을 낭비한다. 양쪽 방향을 모두 검사해야 상수로 박아넣은 코드를
+    잡을 수 있다.
+    """
+    llm = RecordingLLM()
+    service = build_service(monkeypatch, llm, _one_chunk(chunk_text))
+
+    asyncio.run(service.ask_question("질문"))
+
+    answer_prompt = llm.prompts("answer")[0]
+    assert ("문자 인식(OCR)으로" in answer_prompt) is notice_expected

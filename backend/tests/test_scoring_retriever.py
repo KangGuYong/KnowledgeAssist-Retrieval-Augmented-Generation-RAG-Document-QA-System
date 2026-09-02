@@ -142,7 +142,11 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
     # 실제 Settings 대신 필요한 두 값만 가진 대역으로 갈아끼운다.
     monkeypatch.setattr(
         rag_module, "settings",
-        SimpleNamespace(retrieval_k=10, retrieval_reorder=configured),
+        SimpleNamespace(
+            retrieval_k=10,
+            retrieval_reorder=configured,
+            ocr_block_prefix="[이미지 텍스트]",
+        ),
     )
 
     # __init__은 임베딩 모델과 Ollama 연결을 요구하므로 우회한다.

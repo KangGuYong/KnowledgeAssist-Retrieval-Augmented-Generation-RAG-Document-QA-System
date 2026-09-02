@@ -32,16 +32,21 @@ _ROLE_PREFIXES = {"human": "Human: ", "ai": "Assistant: "}
 # 문맥 중 '[이미지 텍스트]'는 OCR로 추출된 것이라 오탈자가 있을 수 있다. 청크
 # 본문에 이미 인라인으로 박혀 있으므로(mineru_client._format_ocr_block), 여기서는 LLM에게
 # 그 마커를 어떻게 다뤄야 하는지만 알려준다.
+#
+# 검색된 청크에 마커가 하나도 없으면 이 문단은 붙이지 않는다(_ocr_notice_for).
+# 앞뒤 개행까지 포함해야 붙일 때와 뗄 때 모두 문단 간격이 맞는다.
+_OCR_NOTICE = """
+문맥 중 '[이미지 텍스트]'로 표시된 부분은 문서의 도표·이미지에서 문자 인식(OCR)으로
+추출한 것이라 오탈자가 있을 수 있다. 이를 근거로 답할 때는 인명·지명 등 고유명사를
+단정하지 말고, 해당 페이지의 도표를 직접 확인하도록 안내하라.
+"""
+
 QA_PROMPT = PromptTemplate(
     template="""당신은 주어진 컨텍스트를 기반으로 정확한 정보를 제공하는 AI 어시스턴트입니다.
 
 ## 검색된 문서
 {context}
-
-문맥 중 '[이미지 텍스트]'로 표시된 부분은 문서의 도표·이미지에서 문자 인식(OCR)으로
-추출한 것이라 오탈자가 있을 수 있다. 이를 근거로 답할 때는 인명·지명 등 고유명사를
-단정하지 말고, 해당 페이지의 도표를 직접 확인하도록 안내하라.
-
+{ocr_notice}
 ## 응답 규칙
 1. **정확성**: 컨텍스트에 명시된 정보만 사용하세요.
 2. **출처 인용**: 답변에 사용한 정보의 출처를 [출처: 문서명] 형식으로 표시하세요.
@@ -53,7 +58,7 @@ QA_PROMPT = PromptTemplate(
 {question}
 
 위 규칙을 따라 답변하세요:""",
-    input_variables=["context", "question"],
+    input_variables=["context", "ocr_notice", "question"],
 )
 
 # ConversationalRetrievalChain이 쓰던 기본 프롬프트를 그대로 옮겨 왔다
@@ -89,6 +94,15 @@ def _format_chat_history(messages: List[BaseMessage]) -> str:
 def _format_context(docs: List[Document]) -> str:
     """검색된 청크를 컨텍스트 문자열로 조립한다."""
     return _DOCUMENT_SEPARATOR.join(doc.page_content for doc in docs)
+
+
+def _ocr_notice_for(context: str) -> str:
+    """OCR 마커가 실제로 컨텍스트에 있을 때만 주의문을 돌려준다.
+
+    항상 붙이면 도표가 섞이지 않은 답변에서도 LLM이 "도표를 직접 확인하라"고
+    불필요하게 헤지하고, 매 요청 토큰도 낭비한다.
+    """
+    return _OCR_NOTICE if settings.ocr_block_prefix in context else ""
 
 
 class ScoringRetriever(BaseRetriever):
@@ -208,9 +222,14 @@ class RAGService:
             # ConversationalRetrievalChain의 rephrase_question=True 기본값과 같다.
             docs = await retriever.ainvoke(standalone_question)
 
+            context = _format_context(docs)
             answer_chain = QA_PROMPT | self.llm | StrOutputParser()
             answer = await answer_chain.ainvoke(
-                {"context": _format_context(docs), "question": standalone_question}
+                {
+                    "context": context,
+                    "ocr_notice": _ocr_notice_for(context),
+                    "question": standalone_question,
+                }
             )
 
         except Exception as e:

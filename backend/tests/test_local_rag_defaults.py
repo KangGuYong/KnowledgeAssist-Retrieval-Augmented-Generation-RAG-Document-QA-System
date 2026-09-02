@@ -23,10 +23,12 @@ def test_rag_service_builds_an_ollama_chat_model():
 
 
 def test_qa_prompt_warns_about_ocr_marker():
-    from app.services.rag_service import QA_PROMPT
+    """OCR 주의문은 이제 조건부라 템플릿이 아니라 별도 상수에 있다."""
+    from app.services.rag_service import QA_PROMPT, _OCR_NOTICE
 
-    assert "[이미지 텍스트]" in QA_PROMPT.template
+    assert "[이미지 텍스트]" in _OCR_NOTICE
     assert "{context}" in QA_PROMPT.template
+    assert "{ocr_notice}" in QA_PROMPT.template
     assert "{question}" in QA_PROMPT.template
 
 
