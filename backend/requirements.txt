@@ -2,8 +2,13 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# LangChain 1.x 마이그레이션 0단계로 먼저 올린다(docs/superpowers/specs/
+# 2026-09-02-langchain-1x-migration-design.md). langchain 1.3.18은 pydantic>=2.7.4를,
+# langchain-community 0.4.2는 pydantic-settings>=2.10.1을 요구하는데, 이 범프가
+# LangChain 자체보다 파급면이 넓어(설정 로딩, 응답 모델, FastAPI 호환) 별도 커밋으로
+# 분리했다. fastapi 0.109.0은 pydantic<3.0.0을 허용하므로 그대로 둔다.
+pydantic==2.13.5
+pydantic-settings==2.15.0
 
 # RAG Pipeline
 # langchain/langchain-community bumped from 0.1.0/0.0.10 to 0.1.20/0.0.38,
