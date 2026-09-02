@@ -11,6 +11,7 @@ LLM은 프롬프트를 기록하는 대역이며 실제 Ollama를 부르지 않�
 import asyncio
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
@@ -54,7 +55,7 @@ class RecordingLLM:
         return [text for recorded_kind, text in self.calls if recorded_kind == kind]
 
 
-def build_service(monkeypatch, llm, results=(), reorder=False):
+def build_service(monkeypatch, llm, results=(), reorder=False, llm_max_attempts=1):
     """__init__ 없이 RAGService를 세운다(임베딩 모델·Ollama 연결 회피)."""
     monkeypatch.setattr(
         rag_module, "settings",
@@ -62,6 +63,7 @@ def build_service(monkeypatch, llm, results=(), reorder=False):
             retrieval_k=5,
             retrieval_reorder=reorder,
             ocr_block_prefix="[이미지 텍스트]",
+            llm_max_attempts=llm_max_attempts,
         ),
     )
     service = RAGService.__new__(RAGService)
@@ -212,3 +214,57 @@ def test_ocr_notice_rides_along_only_when_the_context_has_the_marker(
 
     answer_prompt = llm.prompts("answer")[0]
     assert ("문자 인식(OCR)으로" in answer_prompt) is notice_expected
+
+
+class FlakyLLM:
+    """정해진 횟수만큼 실패한 뒤 성공하는 LLM 대역."""
+
+    def __init__(self, error, failures):
+        self.error = error
+        self.failures = failures
+        self.attempts = 0
+
+    def __call__(self, _prompt_value):
+        self.attempts += 1
+        if self.attempts <= self.failures:
+            raise self.error
+        return AIMessage(content="답변")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionError("ollama unreachable"), httpx.ReadTimeout("too slow")],
+)
+def test_a_transient_llm_failure_is_retried(monkeypatch, error):
+    """원격 Ollama가 잠깐 끊긴 것만으로 대화가 500이 되면 안 된다."""
+    # 한 번만 실패시킨다. 재시도가 일어난다는 사실을 보여주는 데는 충분하고,
+    # with_retry의 지수 백오프가 테스트 실행 시간을 잡아먹지 않는다.
+    llm = FlakyLLM(error, failures=1)
+    service = build_service(monkeypatch, llm, _one_chunk(), llm_max_attempts=3)
+
+    result = asyncio.run(service.ask_question("질문"))
+
+    assert llm.attempts == 2
+    assert result["answer"] == "답변"
+
+
+def test_a_permanent_llm_failure_is_not_retried(monkeypatch):
+    """모델 없음·잘못된 요청처럼 다시 걸어도 같은 실패는 재시도하지 않는다."""
+    llm = FlakyLLM(ValueError("model not found"), failures=99)
+    service = build_service(monkeypatch, llm, _one_chunk(), llm_max_attempts=3)
+
+    with pytest.raises(ValueError):
+        asyncio.run(service.ask_question("질문"))
+
+    assert llm.attempts == 1
+
+
+def test_retry_can_be_turned_off(monkeypatch):
+    """llm_max_attempts=1이면 일시적 실패도 그대로 올라온다."""
+    llm = FlakyLLM(ConnectionError("ollama unreachable"), failures=99)
+    service = build_service(monkeypatch, llm, _one_chunk(), llm_max_attempts=1)
+
+    with pytest.raises(ConnectionError):
+        asyncio.run(service.ask_question("질문"))
+
+    assert llm.attempts == 1

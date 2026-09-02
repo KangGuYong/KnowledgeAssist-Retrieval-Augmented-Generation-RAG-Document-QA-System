@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     llm_model: str = "gemma4:26b-a4b-it-q4_K_M"
     llm_temperature: float = 0.0
     max_tokens: int = 2000
+    # 원격 Ollama가 잠깐 끊기거나 응답이 늦을 때만 다시 시도한다. 모델 없음·잘못된
+    # 요청 같은 영구 실패는 몇 번을 걸어도 같으므로 재시도 대상이 아니다.
+    # 1로 두면 재시도하지 않는다.
+    llm_max_attempts: int = 3
 
     # OCR (PDF image regions -> text)
     ocr_enabled: bool = True  # Whether image blocks get PaddleOCR augmentation (MinerU parsing itself is controlled by mineru_enabled)

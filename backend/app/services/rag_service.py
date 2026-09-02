@@ -7,6 +7,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_ollama import ChatOllama
 from typing import Any, Dict, List, Optional
+import httpx
 import logging
 import uuid
 
@@ -28,6 +29,11 @@ _DOCUMENT_SEPARATOR = "\n\n"
 
 # ConversationalRetrievalChain._get_chat_history가 쓰던 역할 접두다.
 _ROLE_PREFIXES = {"human": "Human: ", "ai": "Assistant: "}
+
+# ollama 클라이언트는 httpx.ConnectError를 내장 ConnectionError로 바꿔 던지고,
+# 타임아웃은 httpx 예외 그대로 올려보낸다. 둘 다 다시 걸면 성공할 수 있는 실패다.
+# ollama.ResponseError는 404(모델 없음)와 500이 섞여 있어 재시도 대상에서 뺀다.
+_TRANSIENT_LLM_ERRORS = (ConnectionError, httpx.TimeoutException)
 
 # 문맥 중 '[이미지 텍스트]'는 OCR로 추출된 것이라 오탈자가 있을 수 있다. 청크
 # 본문에 이미 인라인으로 박혀 있으므로(mineru_client._format_ocr_block), 여기서는 LLM에게
@@ -162,6 +168,18 @@ class RAGService:
             temperature=settings.llm_temperature,
         )
 
+    def _llm_with_retry(self):
+        """일시적 실패에만 재시도를 붙인 LLM Runnable.
+
+        원격 Ollama(ollama_base_url)가 순간적으로 불통이면 대화가 그대로
+        500으로 끝나던 것을 막는다. 재시도 간격은 with_retry의 지수 백오프를
+        따른다.
+        """
+        return self.llm.with_retry(
+            retry_if_exception_type=_TRANSIENT_LLM_ERRORS,
+            stop_after_attempt=settings.llm_max_attempts,
+        )
+
     async def _condense_question(
         self, question: str, history: List[BaseMessage]
     ) -> str:
@@ -175,7 +193,7 @@ class RAGService:
         if not chat_history:
             return question
 
-        chain = CONDENSE_PROMPT | self.llm | StrOutputParser()
+        chain = CONDENSE_PROMPT | self._llm_with_retry() | StrOutputParser()
         return await chain.ainvoke(
             {"chat_history": chat_history, "question": question}
         )
@@ -223,7 +241,7 @@ class RAGService:
             docs = await retriever.ainvoke(standalone_question)
 
             context = _format_context(docs)
-            answer_chain = QA_PROMPT | self.llm | StrOutputParser()
+            answer_chain = QA_PROMPT | self._llm_with_retry() | StrOutputParser()
             answer = await answer_chain.ainvoke(
                 {
                     "context": context,

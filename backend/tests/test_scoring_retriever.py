@@ -146,6 +146,7 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
             retrieval_k=10,
             retrieval_reorder=configured,
             ocr_block_prefix="[이미지 텍스트]",
+            llm_max_attempts=1,
         ),
     )
 
