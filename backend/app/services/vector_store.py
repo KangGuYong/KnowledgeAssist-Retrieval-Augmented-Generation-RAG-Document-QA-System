@@ -1,4 +1,5 @@
 from langchain_community.vectorstores import Chroma
+import chromadb.config
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from typing import Optional
@@ -24,13 +25,26 @@ def get_embeddings():
 
 @lru_cache()
 def get_vector_store() -> Chroma:
-    """Get or create ChromaDB vector store."""
+    """Get or create ChromaDB vector store.
+
+    Telemetry is off. Nothing in this application talks to a third party,
+    and chromadb's PostHog reporting was the one exception - it also failed
+    loudly on every query, because chromadb 0.4.22 calls posthog.capture()
+    positionally and posthog 7.x made those arguments keyword-only.
+
+    Passing client_settings skips the branch in Chroma.__init__ that sets
+    is_persistent for us, so it has to be set here.
+    """
     embeddings = get_embeddings()
 
     vector_store = Chroma(
         collection_name=settings.collection_name,
         embedding_function=embeddings,
-        persist_directory=settings.chroma_persist_dir
+        persist_directory=settings.chroma_persist_dir,
+        client_settings=chromadb.config.Settings(
+            is_persistent=True,
+            anonymized_telemetry=False,
+        ),
     )
 
     logger.info("Vector store initialized")
