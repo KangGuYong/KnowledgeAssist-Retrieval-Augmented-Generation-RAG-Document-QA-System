@@ -28,7 +28,7 @@ _LONG_CONTEXT_REORDER = LongContextReorder()
 QA_PROMPT = PromptTemplate(
     template="""당신은 주어진 컨텍스트를 기반으로 정확한 정보를 제공하는 AI 어시스턴트입니다.
 
-## 검색된 문서 (관련성 순)
+## 검색된 문서
 {context}
 
 문맥 중 '[이미지 텍스트]'로 표시된 부분은 문서의 도표·이미지에서 문자 인식(OCR)으로

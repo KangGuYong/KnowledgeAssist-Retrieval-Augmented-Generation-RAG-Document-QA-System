@@ -35,3 +35,10 @@ def test_retrieval_reorder_is_enabled_by_default():
     settings = Settings(_env_file=None)
 
     assert settings.retrieval_reorder is True
+
+
+def test_qa_prompt_does_not_claim_the_context_is_relevance_ordered():
+    """재배치 후에는 컨텍스트가 관련성 순이 아니므로 그렇게 말하면 안 된다."""
+    from app.services.rag_service import QA_PROMPT
+
+    assert "관련성 순" not in QA_PROMPT.template
