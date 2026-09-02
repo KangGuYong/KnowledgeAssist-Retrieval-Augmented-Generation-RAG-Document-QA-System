@@ -1,5 +1,6 @@
 """ScoringRetriever must expose the similarity score that as_retriever() drops."""
 
+import pytest
 from langchain.schema import Document
 
 from app.services.rag_service import ScoringRetriever
@@ -105,10 +106,11 @@ def test_empty_search_result_does_not_blow_up():
     assert retriever.get_relevant_documents("질문") == []
 
 
-def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch):
+@pytest.mark.parametrize("configured", [True, False])
+def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch, configured):
     """RETRIEVAL_REORDER가 실제로 리트리버까지 전달되는지 확인한다.
 
-    이 배선이 빠지면 설정을 꺼도 재배치가 계속 동작한다.
+    한쪽 방향만 검사하면 reorder를 상수로 박아넣은 코드를 잡지 못한다.
     """
     import asyncio
     from types import SimpleNamespace
@@ -131,7 +133,8 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
     )
     # 실제 Settings 대신 필요한 두 값만 가진 대역으로 갈아끼운다.
     monkeypatch.setattr(
-        rag_module, "settings", SimpleNamespace(retrieval_k=10, retrieval_reorder=False)
+        rag_module, "settings",
+        SimpleNamespace(retrieval_k=10, retrieval_reorder=configured),
     )
 
     # __init__은 임베딩 모델과 Ollama 연결을 요구하므로 우회한다.
@@ -142,5 +145,5 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
 
     asyncio.run(service.ask_question("질문"))
 
-    assert captured["retriever"].reorder is False
+    assert captured["retriever"].reorder is configured
     assert captured["retriever"].k == 10

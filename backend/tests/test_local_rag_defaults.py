@@ -32,6 +32,6 @@ def test_qa_prompt_warns_about_ocr_marker():
 
 def test_retrieval_reorder_is_enabled_by_default():
     """Lost in the Middle 완화는 기본으로 켜져 있고, 끌 수 있어야 한다."""
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.retrieval_reorder is True
