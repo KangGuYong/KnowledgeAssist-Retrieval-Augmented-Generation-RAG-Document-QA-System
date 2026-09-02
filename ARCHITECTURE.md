@@ -208,9 +208,9 @@ Chroma는 메타데이터 값으로 `str`/`int`/`float`/`bool`만 받는다. `No
 실제로 `GET /api/v1/documents/parsed`를 문서 목록으로 쓴다.
 
 삭제(`DELETE /{document_id}`)는 네 곳을 모두 지운다: Chroma 청크, 저장된 이미지,
-파싱 결과 JSON, 업로드 원본 파일. Chroma 삭제는 `vector_store.delete(where=...)`가
-langchain-community 0.0.38에서 `where=`를 조용히 버리는 버그가 있어
-`_collection.delete(where=...)`로 하위 컬렉션을 직접 호출한다.
+파싱 결과 JSON, 업로드 원본 파일. Chroma 삭제는 `vector_store.delete(where=...)`를
+그대로 쓴다. langchain-community 0.0.38에서는 이 호출이 `where=`를 조용히 버려
+`_collection`을 직접 호출해야 했으나, 0.4.2는 `**kwargs`를 그대로 넘긴다.
 
 ### 4.8 대화 메모리는 인메모리
 
