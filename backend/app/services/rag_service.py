@@ -5,6 +5,7 @@ from langchain.prompts import PromptTemplate
 from langchain.schema import Document
 from langchain.schema.retriever import BaseRetriever
 from langchain_community.chat_models import ChatOllama
+from langchain_community.document_transformers import LongContextReorder
 from typing import Any, Dict, List, Optional
 import logging
 import uuid
@@ -15,6 +16,11 @@ from app.api.models.responses import SourceDocument
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# LLM은 긴 컨텍스트의 가운데를 잘 놓친다(Liu et al. 2023, "Lost in the Middle").
+# 관련성 높은 청크를 양 끝으로 보내 이 취약 구간을 피한다. 상태가 없는 객체라
+# 요청마다 새로 만들 이유가 없다.
+_LONG_CONTEXT_REORDER = LongContextReorder()
 
 # 문맥 중 '[이미지 텍스트]'는 OCR로 추출된 것이라 오탈자가 있을 수 있다. 청크
 # 본문에 이미 인라인으로 박혀 있으므로(mineru_client._format_ocr_block), 여기서는 LLM에게
@@ -50,11 +56,16 @@ class ScoringRetriever(BaseRetriever):
     점수를 버린다. similarity_search_with_relevance_scores를 직접 호출해
     doc.metadata['similarity_score']에 채워, 답변 생성과 동일한 검색 결과에서
     나온 점수를 그대로 출처 응답까지 이어지게 한다.
+
+    reorder=True면 관련성 높은 청크를 컨텍스트 양 끝으로 재배치한다. 점수는
+    메타데이터에 남으므로, 사용자에게 보여줄 출처 목록은 _format_sources가
+    다시 점수 순으로 되돌린다.
     """
 
     vector_store: Any
     k: int
     search_filter: Optional[dict] = None
+    reorder: bool = True
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
@@ -62,9 +73,16 @@ class ScoringRetriever(BaseRetriever):
         results = self.vector_store.similarity_search_with_relevance_scores(
             query, k=self.k, filter=self.search_filter
         )
+        # 점수는 반드시 재배치 "전"에 심는다. 재배치하면 문서 순서가 바뀌면서
+        # results의 (doc, score) 짝을 더는 위치로 복원할 수 없다.
         for doc, score in results:
             doc.metadata["similarity_score"] = score
-        return [doc for doc, _ in results]
+
+        docs = [doc for doc, _ in results]
+        if not self.reorder:
+            return docs
+        # transform_documents는 Sequence를 돌려주므로 List로 맞춘다.
+        return list(_LONG_CONTEXT_REORDER.transform_documents(docs))
 
 
 class RAGService:
@@ -130,6 +148,7 @@ class RAGService:
             vector_store=self.vector_store,
             k=search_kwargs["k"],
             search_filter=search_kwargs.get("filter"),
+            reorder=settings.retrieval_reorder,
         )
 
         # Create conversational chain
