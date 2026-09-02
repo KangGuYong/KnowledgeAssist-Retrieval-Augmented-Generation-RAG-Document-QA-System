@@ -28,3 +28,10 @@ def test_qa_prompt_warns_about_ocr_marker():
     assert "[이미지 텍스트]" in QA_PROMPT.template
     assert "{context}" in QA_PROMPT.template
     assert "{question}" in QA_PROMPT.template
+
+
+def test_retrieval_reorder_is_enabled_by_default():
+    """Lost in the Middle 완화는 기본으로 켜져 있고, 끌 수 있어야 한다."""
+    settings = Settings()
+
+    assert settings.retrieval_reorder is True

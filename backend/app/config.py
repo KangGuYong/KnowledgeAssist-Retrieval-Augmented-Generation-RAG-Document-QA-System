@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retrieval_k: int = 10  # Number of chunks to retrieve
+    # 검색 결과를 관련성 순서 그대로 넣지 않고, 관련성 높은 청크를 컨텍스트
+    # 양 끝으로 보낸다(Lost in the Middle 완화). 끄면 관련성 내림차순 그대로.
+    retrieval_reorder: bool = True
 
     # Chunking strategy
     chunking_strategy: str = "default"  # "default" | "semantic"
