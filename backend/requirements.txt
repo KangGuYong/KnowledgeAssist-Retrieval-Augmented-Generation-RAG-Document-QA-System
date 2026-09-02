@@ -35,12 +35,22 @@ python-docx==1.1.0
 tiktoken==0.5.2
 
 # OCR (replaces PDF image regions with text)
-# 3.2.2 is the newest paddlepaddle with Linux aarch64 wheels on PyPI; 3.3.x
-# publishes those only on PaddlePaddle's own index. For the CUDA build (or a
-# newer version on aarch64), install paddle separately from:
+# paddlepaddle is held at 3.0.0 because every later release segfaults on this
+# aarch64 host. The crash is in AnalysisPredictor::SaveOrLoadPirParameters
+# while building the detection predictor, and it needs `import paddlex` to have
+# happened first - paddle.inference loads the very same model files fine in a
+# process that has not imported it. Verified against the cp312/aarch64 wheels:
+# 3.2.2, 3.2.1, 3.1.1 and 3.1.0 all segfault, 3.0.0 does not.
+#
+# 3.3.x publishes aarch64 wheels only on PaddlePaddle's own index. For a CUDA
+# build (these are CPU-only), install paddle separately from:
 #   https://www.paddlepaddle.org.cn/packages/stable/cpu/
-paddlepaddle==3.2.2
+paddlepaddle==3.0.0
 paddleocr==3.7.0
+# paddlex arrives through paddleocr and was previously unpinned, so it could
+# move on its own; pinned because it is the package whose import triggers the
+# crash above.
+paddlex==3.7.2
 PyMuPDF==1.28.2
 
 # Utilities
