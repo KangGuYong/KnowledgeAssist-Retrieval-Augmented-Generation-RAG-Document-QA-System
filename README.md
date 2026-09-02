@@ -1,466 +1,295 @@
 # Knowledge Assist RAG
 
-A full-stack Retrieval-Augmented Generation (RAG) application that allows users to upload documents and ask questions about them using AI. The system uses LangChain, ChromaDB for vector storage, and supports both Anthropic and OpenAI LLMs.
+A fully self-hosted Retrieval-Augmented Generation application for Korean documents.
+Upload PDFs, TXT, or DOCX files and ask questions about them.
 
-## ✨ Features
+**No API keys required.** The LLM, the embedding model, the PDF parser, and OCR all
+run locally (or on a host you control) — nothing is sent to a third-party API.
 
-- **Document Upload**: Upload PDFs, TXT, and DOCX files with drag-and-drop support
-- **Smart Chunking**: Automatically splits documents into optimal chunks for retrieval
-- **Vector Search**: Uses ChromaDB for fast semantic search across documents
-- **AI-Powered Answers**: Leverages Claude or GPT models for context-aware responses
-- **Source Citations**: Every answer includes references to source documents with page numbers
-- **Conversation Memory**: Maintains conversation context for follow-up questions
-- **Beautiful UI**: Modern React interface with real-time updates
+For the design rationale behind the pipeline, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
-## 🏗️ Architecture
+## Features
 
-### RAG Pipeline Flow
+- **Korean-first retrieval** — `nlpai-lab/KURE-v1` embeddings, a Korean PaddleOCR
+  recognition model, and MinerU configured for Korean layout
+- **Layout-aware PDF parsing** — MinerU extracts text, tables, formulas, and figures
+  rather than a flat text dump; `pypdf` is the fallback if MinerU is unavailable
+- **OCR for figures** — text inside images is recognised and spliced into the page
+  under an `[이미지 텍스트]` marker, so charts are searchable
+- **Two chunking strategies** — fixed-size character splitting, or semantic chunking
+  at embedding-similarity breakpoints
+- **Source citations** — every answer cites document, page, relevance score, and the
+  figure images the chunk came from
+- **Parsed-document viewer** — inspect exactly what MinerU extracted, page by page
+- **Per-document search scope** — choose which uploaded documents the chat searches
+- **Conversation memory** — follow-up questions are rewritten into standalone queries
+
+## Architecture
+
+### Ingestion
 
 ```
-1. Upload Document
-   ↓
-2. Parse & Chunk (with overlap)
-   ↓
-3. Generate Embeddings (Sentence Transformers)
-   ↓
-4. Store in Vector DB (ChromaDB)
-   ↓
-5. User Question → Semantic Search
-   ↓
-6. Retrieve Relevant Chunks
-   ↓
-7. LLM Context + Question → Answer
-   ↓
-8. Return Answer + Source Citations
+PDF upload
+  → MinerU /file_parse            (layout, tables, formulas, figures)
+  → PaddleOCR on image blocks     (isolated subprocess)
+  → drop running headers/footers and page numbers
+  → one Document per page
+  → merge consecutive pages up to chunk_size
+  → split (fixed-size or semantic)
+  → KURE-v1 embeddings → ChromaDB
 ```
 
-## 🛠️ Technology Stack
+The raw MinerU output is also saved to disk as a read-only side channel that backs
+the document viewer tab.
+
+### Query
+
+```
+question + conversation history
+  → LLM call #1: rewrite into a standalone question
+  → similarity search (k=10, filtered to the selected documents)
+  → LLM call #2: answer from the retrieved chunks
+  → answer + source citations
+```
+
+## Technology Stack
 
 ### Backend
-- **FastAPI** 0.109.0 - High-performance Python web framework
-- **LangChain** 0.1.0 - RAG pipeline orchestration
-- **ChromaDB** 0.4.22 - Vector database for embeddings
-- **Sentence Transformers** 2.2.2 - Local embedding generation
-- **Pydantic** 2.5.0 - Data validation and settings
-- **Anthropic/OpenAI** - LLM providers
+
+| Area | Technology | Version |
+|---|---|---|
+| Web framework | FastAPI + Uvicorn | 0.109.0 / 0.27.0 |
+| Settings & validation | Pydantic / pydantic-settings | 2.5.0 / 2.1.0 |
+| RAG orchestration | LangChain / langchain-community | 0.1.20 / 0.0.38 |
+| Vector store | ChromaDB | 0.4.22 |
+| Embeddings | sentence-transformers + `nlpai-lab/KURE-v1` | 3.3.1 |
+| LLM | Ollama (`gemma4:26b-a4b-it-q4_K_M`) | — |
+| PDF parsing | MinerU (HTTP service) | — |
+| OCR | PaddleOCR + PaddlePaddle | 3.7.0 / 3.2.2 |
+| PDF fallback | pypdf / PyMuPDF | 4.0.0 / 1.28.2 |
+| Tests | pytest | 7.4.4 |
+
+Semantic chunking is a direct port of the "5 Levels of Text Splitting" notebook
+(Level 4) rather than `langchain-experimental`, which is therefore not a dependency.
 
 ### Frontend
-- **React** 18.2.0 - Modern UI library
-- **TypeScript** 5.3.3 - Type-safe development
-- **Vite** 5.0.11 - Fast build tool
-- **Axios** 1.6.5 - HTTP client
-- **React Dropzone** 14.2.3 - File upload with drag & drop
-- **React Markdown** 9.0.1 - Render formatted responses
-- **Lucide React** - Beautiful icons
 
-## 📁 Project Structure
+React 18.2 · TypeScript 5.3 · Vite 5.0 · axios 1.6 · react-dropzone 14.2 ·
+react-markdown 9.0 · DOMPurify 3.4 · lucide-react
 
-```
-KnowledgeAssist RAG/
-├── backend/                    # FastAPI backend
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── routes/        # API endpoints (upload, chat, documents)
-│   │   │   └── models/        # Request/response models
-│   │   ├── services/
-│   │   │   ├── vector_store.py        # ChromaDB integration
-│   │   │   ├── document_processor.py  # File parsing & chunking
-│   │   │   └── rag_service.py         # RAG pipeline
-│   │   ├── core/              # Configuration
-│   │   └── storage/           # File and vector storage
-│   ├── requirements.txt
-│   └── .env.example
-│
-├── frontend/                   # React frontend
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── FileUploader.tsx      # Drag-and-drop upload
-│   │   │   ├── ChatWindow.tsx        # Chat interface
-│   │   │   ├── Message.tsx           # Message display
-│   │   │   └── SourceCitation.tsx    # Source references
-│   │   ├── services/          # API client
-│   │   ├── types/             # TypeScript definitions
-│   │   └── styles/            # CSS files
-│   ├── package.json
-│   └── vite.config.ts
-│
-└── README.md
-```
+No state-management library — `App.tsx` owns the document list and passes it down.
 
-## 🚀 Quick Start
+## Prerequisites
 
-### Prerequisites
+- **Python 3.12** (developed against 3.12.3)
+- **Node.js 18+**
+- **[Ollama](https://ollama.com/)** running, with the chat model pulled
+- **[MinerU](https://github.com/opendatalab/MinerU)** running as an HTTP service on
+  port 8100 — optional, but without it PDFs fall back to plain text extraction and
+  you lose tables, figures, and the document viewer
+- **NVIDIA GPU** — optional. The embedding model defaults to `cuda`; set
+  `EMBEDDING_DEVICE=cpu` to run without one (noticeably slower).
 
-Before you begin, ensure you have:
-- **Python 3.9+** installed
-- **Node.js 18+** installed
-- An API key from [Anthropic](https://console.anthropic.com/) or [OpenAI](https://platform.openai.com/)
+## Quick Start
 
-### Step 1: Backend Setup
-
-Open a terminal and run:
+### 1. Backend
 
 ```bash
-# Navigate to backend directory
 cd backend
 
-# Create virtual environment
 python -m venv venv
-
-# Activate virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Create environment file
 cp .env.example .env
 ```
 
-Edit the `.env` file and add your API key:
+`paddlepaddle` is pinned to 3.2.2, the newest release with Linux aarch64 wheels on
+PyPI. For the CUDA build, or a newer Paddle on aarch64, install it from
+[PaddlePaddle's own index](https://www.paddlepaddle.org.cn/packages/stable/cpu/).
+
+**Edit `.env` before starting.** `OLLAMA_BASE_URL` defaults to a private LAN address
+and will not work on your machine as-is:
 
 ```bash
-# For Anthropic (Claude)
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
-
-# OR for OpenAI (GPT)
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-xxxxxxxxxxxxx
+OLLAMA_BASE_URL=http://localhost:11434
+LLM_MODEL=gemma4:26b-a4b-it-q4_K_M
 ```
 
-Start the backend server:
+Then start the server:
 
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-You should see:
-```
-INFO:     Uvicorn running on http://0.0.0.0:8000
-INFO:     Application startup complete.
-```
+The first request loads KURE-v1, which downloads the model on a cold start.
 
-**Keep this terminal running!**
+### 2. Frontend
 
-### Step 2: Frontend Setup
-
-Open a **new terminal** window:
+In a new terminal:
 
 ```bash
-# Navigate to frontend directory
 cd frontend
-
-# Install dependencies
 npm install
-
-# (Optional) Create environment file
-cp .env.example .env
-
-# Start development server
 npm run dev
 ```
 
-You should see:
+The Vite dev server proxies `/api` to `http://127.0.0.1:8000`, so no frontend `.env`
+is needed unless the backend runs on a different origin.
+
+### 3. Open
+
+Go to **http://localhost:5173**.
+
+## Usage
+
+1. **Upload** — drag PDF, TXT, or DOCX files onto the upload area. Processing a
+   large PDF takes a while: MinerU parses it, then every figure is OCR'd, then every
+   chunk is embedded. The backend logs `[TIMING]` lines for each stage.
+2. **Pick a scope** — use the document selector to limit which documents the chat
+   searches. All documents are selected by default.
+3. **Ask** — answers cite their sources; expand a citation to see the page, the
+   relevance score, and any figures the chunk came from.
+4. **Inspect** — the **문서 뷰어** tab shows MinerU's raw parse per page. Table blocks
+   show both the extracted HTML and the screenshot MinerU actually parsed, so you can
+   compare them.
+
+## API
+
+Interactive docs at **http://localhost:8000/docs**.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/upload/` | Upload and process one file |
+| POST | `/api/v1/upload/batch` | Upload several; one failure does not abort the rest |
+| POST | `/api/v1/chat/` | Ask a question, get an answer with sources |
+| DELETE | `/api/v1/chat/conversation/{id}` | Clear conversation history |
+| GET | `/api/v1/documents/parsed` | List parsed documents — **the effective document list** |
+| GET | `/api/v1/documents/{id}/parsed` | One document's parsed blocks, per page |
+| GET | `/api/v1/documents/{id}/images/{image_id}` | An extracted figure |
+| GET | `/api/v1/documents/` | Stub — always returns `[]` |
+| DELETE | `/api/v1/documents/{id}` | Delete the document and every artifact of it |
+
+The upload endpoints accept `chunking_strategy` (`default` or `semantic`),
+`chunk_size`, and `chunk_overlap` as form fields.
+
+There is no document-metadata database; the storage directories act as the registry.
+That is why `GET /api/v1/documents/` is a stub and the frontend uses
+`/api/v1/documents/parsed` instead.
+
+## Configuration
+
+Backend settings live in `backend/.env` (see `.env.example`); defaults are in
+`app/config.py`. The ones you are most likely to change:
+
+| Variable | Default | Description |
+|---|---|---|
+| `OLLAMA_BASE_URL` | `http://192.168.0.169:11434` | **Private LAN default — override this** |
+| `LLM_MODEL` | `gemma4:26b-a4b-it-q4_K_M` | Ollama model name |
+| `EMBEDDING_MODEL` | `nlpai-lab/KURE-v1` | Changing this needs a new `COLLECTION_NAME` |
+| `EMBEDDING_DEVICE` | `cuda` | `cpu`, `cuda`, `cuda:0`, … |
+| `RETRIEVAL_K` | `10` | Chunks retrieved per question |
+| `RETRIEVAL_REORDER` | `true` | Put the most relevant chunks at both ends of the context |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `200` | Also the page-merge target size |
+| `CHUNKING_STRATEGY` | `default` | `default` or `semantic` |
+| `MAX_DOCUMENTS` | `10` | Total documents allowed at once |
+| `MAX_UPLOAD_SIZE` | `10485760` | 10 MB |
+| `MINERU_BASE_URL` | `http://127.0.0.1:8100` | Set `MINERU_ENABLED=False` to skip it |
+| `OCR_DEVICE` | `cpu` | `cpu`, `gpu`, `gpu:0`, … |
+| `OCR_ISOLATE_PROCESS` | `True` | Keep enabled — see below |
+
+Frontend: `VITE_API_BASE_URL` — leave empty to use the Vite dev proxy.
+
+> **`OCR_ISOLATE_PROCESS` should stay `True`.** PaddleOCR segfaults in a process that
+> has torch loaded, and this process loads torch for the embedding model. Disabling
+> isolation runs OCR in-process and will crash the API.
+
+## Project Structure
+
 ```
-  VITE v5.0.11  ready in 500 ms
-
-  ➜  Local:   http://localhost:5173/
+├── ARCHITECTURE.md              # Design decisions and rationale
+├── backend/
+│   ├── app/
+│   │   ├── api/routes/          # upload, chat, documents
+│   │   ├── api/models/          # request/response schemas
+│   │   ├── services/
+│   │   │   ├── mineru_client.py       # MinerU HTTP client, page assembly
+│   │   │   ├── ocr_service.py         # PaddleOCR wrapper + subprocess isolation
+│   │   │   ├── ocr_worker.py          # the isolated OCR worker entry point
+│   │   │   ├── document_processor.py  # loading, chunking orchestration
+│   │   │   ├── chunking.py            # page merging, fixed-size + semantic splitters
+│   │   │   ├── parsed_store.py        # persists MinerU output for the viewer
+│   │   │   ├── vector_store.py        # ChromaDB + embeddings
+│   │   │   └── rag_service.py         # the RAG chain and scoring retriever
+│   │   ├── config.py            # Settings
+│   │   └── storage/             # uploads, chroma_db, parsed, images
+│   ├── tests/                   # 149 tests
+│   └── requirements.txt
+├── frontend/
+│   └── src/
+│       ├── components/
+│       │   ├── FileUploader.tsx        # drag-and-drop upload
+│       │   ├── DocumentSelector.tsx    # which documents the chat searches
+│       │   ├── ChatWindow.tsx          # chat interface
+│       │   ├── Message.tsx             # markdown message rendering
+│       │   ├── SourceCitation.tsx      # expandable citations with figures
+│       │   └── ParsedDocumentViewer.tsx # MinerU parse viewer
+│       ├── services/api.ts
+│       └── types/
+└── docs/superpowers/{specs,plans}/     # design docs and implementation plans
 ```
 
-### Step 3: Open the Application
+## Development
 
-Open your browser and go to: **http://localhost:5173**
-
-You should see the Knowledge Assist RAG interface! 🎉
-
-## 📖 Usage Guide
-
-### 1. Upload Documents
-
-- Drag and drop PDF, TXT, or DOCX files into the upload area
-- Wait for processing (you'll see the number of chunks created)
-- Multiple files can be uploaded
-
-### 2. Ask Questions
-
-- Type your question in the chat input
-- Press Enter or click Send
-- The AI will respond based on your documents
-
-### 3. View Sources
-
-- Click on the sources toggle to see which document chunks were used
-- Each source shows:
-  - Document name
-  - Page number (for PDFs)
-  - Relevant text snippet
-
-### 4. Follow-up Questions
-
-- Continue the conversation naturally
-- The system maintains context for related questions
-
-### Example Questions to Try
-
-After uploading a document:
-
-1. "What are the main topics discussed in this document?"
-2. "Can you summarize the key points?"
-3. "What does the document say about [specific topic]?"
-4. "List the important dates or numbers mentioned."
-5. "What conclusions does the author draw?"
-
-## 🔌 API Endpoints
-
-Visit **http://localhost:8000/docs** for interactive API documentation (Swagger UI).
-
-### Upload Endpoints
-
-- `POST /api/v1/upload/` - Upload a single file
-- `POST /api/v1/upload/batch` - Upload multiple files
-
-### Chat Endpoints
-
-- `POST /api/v1/chat/` - Send a question and get an answer
-- `DELETE /api/v1/chat/conversation/{id}` - Clear conversation history
-
-### Document Endpoints
-
-- `GET /api/v1/documents/` - List uploaded documents
-- `DELETE /api/v1/documents/{id}` - Delete a document
-
-## ⚙️ Configuration
-
-### Backend Configuration (`.env`)
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LLM_PROVIDER` | AI provider (anthropic/openai) | anthropic |
-| `ANTHROPIC_API_KEY` | Anthropic API key | - |
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `LLM_MODEL` | Model to use | claude-3-5-sonnet-20241022 |
-| `CHUNK_SIZE` | Text chunk size | 1000 |
-| `CHUNK_OVERLAP` | Overlap between chunks | 200 |
-| `RETRIEVAL_K` | Number of chunks to retrieve | 4 |
-| `MAX_UPLOAD_SIZE` | Max file size in bytes | 10485760 (10MB) |
-| `EMBEDDING_MODEL` | Embedding model | sentence-transformers/all-MiniLM-L6-v2 |
-
-### Frontend Configuration (`.env`)
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `VITE_API_BASE_URL` | Backend API URL | http://localhost:8000 |
-
-## 🐛 Troubleshooting
-
-### Backend Issues
-
-**Problem**: `ModuleNotFoundError`
-- **Solution**: Make sure you activated the virtual environment and ran `pip install -r requirements.txt`
-
-**Problem**: ChromaDB initialization fails
-- **Solution**: Delete `backend/app/storage/chroma_db/` and restart
-
-**Problem**: Out of memory when loading embeddings
-- **Solution**: Use a smaller embedding model or reduce batch size
-
-**Problem**: `Invalid API key`
-- **Solution**: Check that you've correctly set your API key in `backend/.env`
-
-### Frontend Issues
-
-**Problem**: `ENOENT: no such file or directory`
-- **Solution**: Make sure you're in the `frontend` directory and ran `npm install`
-
-**Problem**: CORS errors
-- **Solution**: Ensure backend `ALLOWED_ORIGINS` includes your frontend URL
-
-**Problem**: File upload fails
-- **Solution**: Check file size limits and supported file types
-
-**Problem**: Cannot connect to backend
-- **Solution**: Ensure the backend is running on port 8000
-
-### API Errors
-
-**Error**: `Rate limit exceeded`
-- **Solution**: You've hit your API provider's rate limit. Wait a few minutes and try again.
-
-## 🧪 Development
-
-### Backend Development
-
-Run tests:
 ```bash
+# Backend
 cd backend
-pytest
-```
-
-Format code:
-```bash
+pytest                  # 149 tests
 black app/
-```
 
-### Frontend Development
-
-Type checking:
-```bash
+# Frontend
 cd frontend
-npm run build
+npm run build           # includes tsc type checking
 ```
 
-Linting:
-```bash
-npm run lint
-```
+`npm run lint` is defined in `package.json`, but no ESLint config file is checked
+into the repository, so it currently fails to run.
 
-## 🚢 Production Deployment
+## Troubleshooting
 
-### Production Checklist
+**Chat fails with a connection error** — Ollama is unreachable. Check
+`OLLAMA_BASE_URL`; the default points at a private LAN address.
 
-Before deploying to production:
+**PDFs upload but tables and figures are missing** — MinerU is not running, so the
+pipeline fell back to plain text extraction. The backend logs a warning naming the
+file. Nothing is lost from the upload itself; re-upload once MinerU is up.
 
-- [ ] Add authentication/authorization
-- [ ] Implement rate limiting
-- [ ] Set up database for document metadata (PostgreSQL)
-- [ ] Use production vector store (Pinecone, Weaviate)
-- [ ] Add file virus scanning
-- [ ] Implement user quotas
-- [ ] Set up HTTPS
-- [ ] Configure CDN for frontend
-- [ ] Add error tracking (Sentry)
-- [ ] Set up CI/CD pipeline
-- [ ] Add comprehensive test suite
-- [ ] Implement caching (Redis)
-- [ ] Configure backup strategy
+**The API process crashes during upload** — check that `OCR_ISOLATE_PROCESS=True`.
 
-### Backend Deployment
+**Out of memory loading embeddings** — set `EMBEDDING_DEVICE=cpu`.
 
-1. Set up a production database (PostgreSQL recommended)
-2. Use a production-grade vector store (Pinecone, Weaviate, or managed ChromaDB)
-3. Use a reverse proxy (Nginx)
-4. Set up HTTPS with SSL certificates
+**Upload rejected with "Maximum of 10 documents"** — delete a document first, or
+raise `MAX_DOCUMENTS`.
 
-Example with Docker:
-```bash
-cd backend
-docker build -t rag-backend .
-docker run -p 8000:8000 --env-file .env rag-backend
-```
+**ChromaDB fails to initialise** — delete `backend/app/storage/chroma_db/` and
+restart. This discards every indexed document; re-upload them.
 
-### Frontend Deployment
+**CORS errors** — add your frontend origin to `ALLOWED_ORIGINS`.
 
-1. Build for production:
-```bash
-cd frontend
-npm run build
-```
+## Known Limitations
 
-2. Serve the `dist` folder with a static file server or CDN
+- **No authentication.** Anyone who can reach the API can read and delete everything.
+- **Conversation history is in-memory.** It is lost on restart and is not shared
+  across workers.
+- **Single instance only.** The OCR worker, conversation memory, and cached model
+  singletons are all process-local.
+- **No document-metadata database.** The storage directories are the registry.
+- **Ten documents at a time**, 10 MB each, by default.
+- **Sentence splitting depends on `.`/`?`/`!`.** Documents written without sentence
+  terminators do not chunk semantically in any meaningful way.
+- **MinerU and Ollama are external processes.** MinerU failures degrade gracefully;
+  Ollama being down breaks chat entirely.
 
-3. Update `VITE_API_BASE_URL` to point to your production API
+## License
 
-## 📊 What's Included
-
-### Backend Components
-
-✅ FastAPI application with CORS and lifecycle management
-✅ Pydantic request/response models with validation
-✅ File upload endpoints (single and batch)
-✅ Chat endpoint with conversation support
-✅ Document management endpoints
-✅ VectorStoreService: ChromaDB integration
-✅ DocumentProcessor: PDF, TXT, DOCX support with chunking
-✅ RAGService: Complete LangChain RAG pipeline
-✅ Embedding generation with Sentence Transformers
-✅ Support for both Anthropic and OpenAI LLMs
-✅ Comprehensive error handling
-
-### Frontend Components
-
-✅ FileUploader: Drag-and-drop with react-dropzone
-✅ ChatWindow: Full chat interface with auto-scroll
-✅ Message: Individual message display with markdown
-✅ SourceCitation: Expandable source references
-✅ Type-safe API client with Axios
-✅ Loading states and error handling
-✅ Modern, responsive CSS design
-✅ Mobile-friendly layout
-
-### Features
-
-✅ PDF support with page numbers
-✅ TXT and DOCX support
-✅ File size and type validation
-✅ Automatic text chunking with overlap
-✅ Vector embedding generation
-✅ Semantic search with ChromaDB
-✅ Conversational context management
-✅ Source citations with metadata
-✅ Markdown response formatting
-✅ Typing indicators
-
-## ⚠️ Known Limitations
-
-1. **Document Storage**: Files are stored locally (use S3/cloud storage for production)
-2. **Vector Store**: ChromaDB is local (use managed service for scale)
-3. **No Authentication**: Open access (add auth for production)
-4. **No Persistence**: Conversation history is in-memory
-5. **Rate Limiting**: None implemented (add for production)
-
-## ⏱️ Estimated Setup Time
-
-- **Backend Setup**: 5-10 minutes
-- **Frontend Setup**: 5 minutes
-- **First Document Upload**: 1-2 minutes (embeddings download)
-- **Total Time to Running**: ~15 minutes
-
-## 🔗 Resources
-
-- **API Documentation**: http://localhost:8000/docs
-- **Frontend Dev Server**: http://localhost:5173
-- **Backend Health Check**: http://localhost:8000/health
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
-## 🙏 Acknowledgments
-
-- Built with [LangChain](https://langchain.com/)
-- Vector storage by [ChromaDB](https://www.trychroma.com/)
-- Embeddings by [Sentence Transformers](https://www.sbert.net/)
-- UI components by [Lucide Icons](https://lucide.dev/)
-
-## 💬 Support
-
-For issues and questions:
-- Check the troubleshooting section above
-- Review the [API documentation](http://localhost:8000/docs)
-- Open an issue on GitHub
-
-## 🎯 Stopping the Application
-
-To stop the servers:
-
-1. **Backend**: Press `Ctrl+C` in the backend terminal
-2. **Frontend**: Press `Ctrl+C` in the frontend terminal
-
-To deactivate the Python virtual environment:
-```bash
-deactivate
-```
-
----
+MIT — see [LICENSE](LICENSE).
