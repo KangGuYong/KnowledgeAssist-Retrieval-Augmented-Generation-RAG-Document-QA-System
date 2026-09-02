@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
@@ -82,9 +82,7 @@ class Settings(BaseSettings):
     # run of short lines cannot produce chunks too small to answer anything.
     semantic_chunker_min_chunk_chars: int = 200
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
 
 @lru_cache()

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 
@@ -25,8 +25,8 @@ class ChatResponse(BaseModel):
     message_id: str = Field(..., description="Unique message ID")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "answer": "The document discusses machine learning fundamentals...",
                 "sources": [
@@ -44,6 +44,7 @@ class ChatResponse(BaseModel):
                 "timestamp": "2025-01-15T10:30:00Z"
             }
         }
+    )
 
 
 class UploadResponse(BaseModel):
