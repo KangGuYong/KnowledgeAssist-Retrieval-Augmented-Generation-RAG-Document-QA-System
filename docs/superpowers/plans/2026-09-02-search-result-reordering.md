@@ -50,9 +50,16 @@ cd backend && app/venv/bin/python -m pytest tests/ -q
 브레인스토밍 이전에 직접 구현한 `reorder_documents` 함수가 워킹트리에 남아 있다. 설계에서 라이브러리를 쓰기로 했으므로 삭제하고, `rag_service.py`를 CRLF 상태인 HEAD로 되돌린 뒤 시작한다.
 
 **Files:**
-- Revert: `backend/app/services/rag_service.py`, `backend/app/config.py`
+- Revert 통째로: `backend/app/services/rag_service.py`
 - Delete: `backend/tests/test_document_reorder.py`
-- Revert: `backend/.env.example`
+- **부분 제거만**: `backend/app/config.py`, `backend/.env.example` (아래 경고 참조)
+
+> **경고 — `git checkout --`를 config.py와 .env.example에 쓰지 말 것.**
+> 두 파일에는 **다른 작업(청킹 개선)의 미커밋 변경**이 섞여 있다.
+> 통째로 되돌리면 `semantic_chunker_min_chunk_chars`, `CHUNKING_STRATEGY`,
+> `SEMANTIC_CHUNKER_*`, `RETRIEVAL_K=4→10`, `MAX_DOCUMENTS`가 전부 사라진다.
+> 이 파일들은 **프로토타입이 넣은 줄만 골라서** 지운다.
+> `rag_service.py`는 프로토타입 이전에 수정된 적이 없으므로 통째로 되돌려도 안전하다.
 
 - [ ] **Step 1: 되돌릴 대상 확인**
 
@@ -61,24 +68,57 @@ cd /itos-llm/KnowledgeAssist-Retrieval-Augmented-Generation-RAG-Document-QA-Syst
 git diff --numstat backend/app/services/rag_service.py backend/app/config.py backend/.env.example
 ```
 
-기대 출력(대략): `rag_service.py`가 240/196처럼 큰 수 — 줄바꿈이 통째로 바뀐 상태다.
+기대: `rag_service.py`가 240/196처럼 큰 수 — 줄바꿈이 통째로 LF로 바뀐 상태다.
+`config.py`는 6/0, `.env.example`은 11/2 내외이며 **이 중 대부분은 다른 작업의 것이다.**
 
-- [ ] **Step 2: 되돌리기**
+- [ ] **Step 2: `rag_service.py`만 통째로 되돌리기**
 
 ```bash
-git checkout -- backend/app/services/rag_service.py backend/app/config.py backend/.env.example
+git checkout -- backend/app/services/rag_service.py
 rm -f backend/tests/test_document_reorder.py
 ```
 
-- [ ] **Step 3: 깨끗해졌는지 확인**
+- [ ] **Step 3: `config.py`에서 프로토타입이 넣은 3줄만 제거**
 
 ```bash
-git status --short backend/
+python3 - <<'EOF'
+p = "backend/app/config.py"
+s = open(p, encoding="utf-8").read()
+block = """    # 검색 결과를 관련성 높은 순서 그대로 넣지 않고, 1등을 맨 앞 / 2등을 맨 뒤로
+    # 번갈아 배치해 중요한 청크가 컨텍스트 가운데에 묻히지 않게 한다.
+    retrieval_reorder: bool = True
+"""
+assert block in s, "프로토타입 블록을 찾지 못했다 - 수동 확인 필요"
+open(p, "w", encoding="utf-8").write(s.replace(block, "", 1))
+print("config.py 정리 완료")
+EOF
 ```
 
-기대: `backend/` 아래에 `M backend/app/services/chunking.py`, `M backend/app/services/document_processor.py`, `M backend/app/services/mineru_client.py`, `M backend/tests/test_chunking.py`, `M backend/tests/test_mineru_client.py`만 남는다. 이들은 **다른 작업의 변경분이므로 절대 건드리지 않는다.** `rag_service.py`, `config.py`, `.env.example`은 목록에 없어야 한다.
+- [ ] **Step 4: `.env.example`에서 프로토타입이 넣은 1줄만 제거**
 
-- [ ] **Step 4: CRLF가 돌아왔는지 확인**
+```bash
+python3 - <<'EOF'
+p = "backend/.env.example"
+s = open(p, encoding="utf-8").read()
+line = "RETRIEVAL_REORDER=true  # 관련성 높은 청크를 컨텍스트 앞/뒤 끝에 번갈아 배치 (Lost in the Middle 완화)\n"
+assert line in s, "프로토타입 줄을 찾지 못했다 - 수동 확인 필요"
+open(p, "w", encoding="utf-8").write(s.replace(line, "", 1))
+print(".env.example 정리 완료")
+EOF
+```
+
+- [ ] **Step 5: 다른 작업의 변경이 살아 있는지 확인**
+
+```bash
+grep -n "semantic_chunker_min_chunk_chars" backend/app/config.py
+grep -n "CHUNKING_STRATEGY\|SEMANTIC_CHUNKER_\|MAX_DOCUMENTS\|RETRIEVAL_K=10" backend/.env.example
+grep -c "RETRIEVAL_REORDER\|retrieval_reorder" backend/app/config.py backend/.env.example
+```
+
+기대: 앞의 두 명령은 결과가 나오고(다른 작업의 변경이 보존됨), 마지막 명령은 두 파일 모두 **`0`**이다.
+하나라도 어긋나면 **멈추고 보고한다.**
+
+- [ ] **Step 6: CRLF가 돌아왔는지 확인**
 
 ```bash
 file backend/app/services/rag_service.py
@@ -86,13 +126,25 @@ file backend/app/services/rag_service.py
 
 기대: `... with CRLF line terminators`
 
-- [ ] **Step 5: 기준선 테스트**
+- [ ] **Step 7: 워킹트리 상태 확인**
+
+```bash
+git status --short backend/
+```
+
+기대: `backend/` 아래에 `M backend/.env.example`, `M backend/app/config.py`,
+`M backend/app/services/chunking.py`, `M backend/app/services/document_processor.py`,
+`M backend/app/services/mineru_client.py`, `M backend/tests/test_chunking.py`,
+`M backend/tests/test_mineru_client.py`가 남는다. **이들은 다른 작업의 변경분이므로 절대 건드리지 않는다.**
+`rag_service.py`와 `test_document_reorder.py`는 목록에 없어야 한다.
+
+- [ ] **Step 8: 기준선 테스트**
 
 ```bash
 cd backend && app/venv/bin/python -m pytest tests/ -q 2>&1 | tail -3
 ```
 
-기대: `156 passed` 에서 삭제한 테스트 7개를 뺀 **`149 passed`**
+기대: **`149 passed`** (156에서 삭제한 프로토타입 테스트 7개를 뺀 값)
 
 커밋하지 않는다 — 되돌리기만 한 상태다.
 
