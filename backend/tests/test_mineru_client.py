@@ -498,3 +498,90 @@ def test_on_parsed_callback_exception_does_not_break_parsing():
 
     assert len(pages) == 1
     assert pages[0].text == "본문"
+
+
+# --- Running headers / page numbers must not reach the chunker -----------
+#
+# A 545-page large-print PDF put the book title on nearly every page. Those
+# blocks were embedded verbatim into every chunk, so 57% of chunks began with
+# the same boilerplate and their embeddings matched the header rather than the
+# body - retrieval returned near-identical title fragments for any question.
+
+
+def test_page_number_blocks_are_dropped_from_page_text():
+    blocks = [
+        {"type": "text", "page_idx": 0, "text": "본문입니다"},
+        {"type": "page_number", "page_idx": 0, "text": "42"},
+    ]
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
+
+    assert pages[0].text == "본문입니다"
+
+
+def test_header_and_footer_blocks_are_dropped_from_page_text():
+    blocks = [
+        {"type": "header", "page_idx": 0, "text": "키다리 아저씨"},
+        {"type": "text", "page_idx": 0, "text": "본문입니다"},
+        {"type": "footer", "page_idx": 0, "text": "블로그 주소"},
+    ]
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
+
+    assert pages[0].text == "본문입니다"
+
+
+def test_short_text_repeated_across_many_pages_is_dropped_as_a_running_header():
+    """MinerU typed 430 of the 546 running-header blocks as plain "text", so
+    filtering on block type alone leaves most of the boilerplate in place."""
+    blocks = []
+    for page_idx in range(10):
+        blocks.append({"type": "text", "page_idx": page_idx, "text": "키다리 아저씨"})
+        blocks.append({"type": "text", "page_idx": page_idx, "text": f"{page_idx}쪽의 고유한 본문 내용입니다"})
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
+
+    assert all("키다리 아저씨" not in page.text for page in pages)
+    assert pages[3].text == "3쪽의 고유한 본문 내용입니다"
+
+
+def test_a_short_line_on_only_a_couple_of_pages_is_kept():
+    """Only text repeating on a large share of pages is boilerplate - a phrase
+    that happens to recur once or twice is real content."""
+    blocks = []
+    for page_idx in range(10):
+        blocks.append({"type": "text", "page_idx": page_idx, "text": f"{page_idx}쪽 본문"})
+    blocks.append({"type": "text", "page_idx": 2, "text": "짧은 반복"})
+    blocks.append({"type": "text", "page_idx": 7, "text": "짧은 반복"})
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
+
+    assert "짧은 반복" in pages[2].text
+    assert "짧은 반복" in pages[7].text
+
+
+def test_a_long_paragraph_repeated_across_pages_is_not_treated_as_boilerplate():
+    """Running headers are short. A long repeated passage is content."""
+    paragraph = "이것은 아주 긴 문단입니다. " * 10
+    blocks = [
+        {"type": "text", "page_idx": page_idx, "text": paragraph} for page_idx in range(10)
+    ]
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
+
+    assert all(paragraph.strip() in page.text for page in pages)
+
+
+def test_a_page_left_empty_by_boilerplate_removal_has_empty_text():
+    """A page carrying nothing but the running header and its page number
+    contributes no text at all, rather than a chunk of pure boilerplate."""
+    blocks = []
+    for page_idx in range(10):
+        blocks.append({"type": "text", "page_idx": page_idx, "text": "키다리 아저씨"})
+        blocks.append({"type": "page_number", "page_idx": page_idx, "text": str(page_idx)})
+    blocks.append({"type": "text", "page_idx": 4, "text": "이 페이지에만 있는 본문"})
+
+    pages = build_pages(blocks, images={}, ocr=StubOCR())
+
+    assert pages[0].text == ""
+    assert pages[4].text == "이 페이지에만 있는 본문"

@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # Distances above this percentile of all consecutive-sentence distances
     # are treated as chunk breakpoints (5 Levels of Text Splitting, Level 4).
     semantic_chunker_breakpoint_percentile: float = 95.0
+    # A breakpoint that would emit a chunk shorter than this is skipped, so a
+    # run of short lines cannot produce chunks too small to answer anything.
+    semantic_chunker_min_chunk_chars: int = 200
 
     class Config:
         env_file = ".env"

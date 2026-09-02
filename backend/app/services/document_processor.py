@@ -10,7 +10,7 @@ import time
 from typing import Optional
 
 from app.config import get_settings
-from app.services.chunking import build_splitter
+from app.services.chunking import build_splitter, merge_pages
 from app.services.mineru_client import PdfPage, parse_and_build_pages
 from app.services import parsed_store
 
@@ -174,7 +174,11 @@ class DocumentProcessor:
 
         start = time.perf_counter()
         splitter = build_splitter(strategy, resolved_chunk_size, resolved_chunk_overlap)
-        chunks = splitter.split_documents(documents)
+        # Neither splitter merges across Documents, and load_document() emits
+        # one per page, so without this a chunk can never outgrow a page - on a
+        # large-print PDF that capped chunks at a fraction of chunk_size.
+        merged = merge_pages(documents, resolved_chunk_size)
+        chunks = splitter.split_documents(merged)
         elapsed = time.perf_counter() - start
 
         for idx, chunk in enumerate(chunks):
@@ -190,8 +194,8 @@ class DocumentProcessor:
                 chunk.metadata["chunk_overlap"] = resolved_chunk_overlap
 
         logger.info(
-            "[TIMING] Chunking (%s): %.2fs, %d chunk(s) - %s",
-            strategy, elapsed, len(chunks), filename,
+            "[TIMING] Chunking (%s): %.2fs, %d page(s) merged into %d, %d chunk(s) - %s",
+            strategy, elapsed, len(documents), len(merged), len(chunks), filename,
         )
         return chunks
 

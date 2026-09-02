@@ -225,6 +225,20 @@ def _ocr_image_block(
     return result
 
 
+# Block types MinerU uses for page furniture. None of them is body text, and
+# leaving them in poisons every chunk that page produces: a 545-page PDF put
+# the book title on nearly every page, so 57% of chunks opened with the same
+# string and matched it instead of their own content at retrieval time.
+_FURNITURE_BLOCK_TYPES = {"header", "footer", "page_number", "page_footnote"}
+
+# MinerU only typed 116 of that book's 546 running-header blocks as "header" -
+# the other 430 came through as plain "text". So repeated short lines are
+# detected by how they behave (same string, many pages) rather than by type.
+_RUNNING_TEXT_MAX_CHARS = 80
+_RUNNING_TEXT_MIN_PAGES = 5
+_RUNNING_TEXT_MIN_PAGE_RATIO = 0.2
+
+
 def _needs_ocr(block: dict) -> bool:
     """True when a block has img_path but no usable structured text of its
     own (table_body / equation text) - it needs PaddleOCR augmentation
@@ -238,6 +252,29 @@ def _needs_ocr(block: dict) -> bool:
     if block.get("type") == "equation" and (block.get("text") or "").strip():
         return False
     return bool(block.get("img_path"))
+
+
+def _running_furniture_texts(blocks: list) -> set:
+    """Short exact strings that recur on a large share of pages.
+
+    Running headers and footers repeat verbatim page after page; real prose
+    does not. Both thresholds must be met, so a phrase that happens to appear
+    on two pages of a ten-page document stays, and a long passage repeated
+    throughout stays too - only short, pervasive lines are furniture.
+    """
+    pages_by_text: dict = {}
+    page_indices = set()
+    for block in blocks:
+        page_idx = block.get("page_idx", 0)
+        page_indices.add(page_idx)
+        if _needs_ocr(block) or block.get("type") == "table":
+            continue
+        text = (block.get("text") or "").strip()
+        if text and len(text) <= _RUNNING_TEXT_MAX_CHARS:
+            pages_by_text.setdefault(text, set()).add(page_idx)
+
+    min_pages = max(_RUNNING_TEXT_MIN_PAGES, len(page_indices) * _RUNNING_TEXT_MIN_PAGE_RATIO)
+    return {text for text, pages in pages_by_text.items() if len(pages) >= min_pages}
 
 
 def build_pages(
@@ -259,6 +296,14 @@ def build_pages(
     for block in blocks:
         by_page.setdefault(block.get("page_idx", 0), []).append(block)
 
+    furniture_texts = _running_furniture_texts(blocks)
+    if furniture_texts:
+        logger.info(
+            "Dropping %d running header/footer string(s) from page text: %s",
+            len(furniture_texts),
+            sorted(furniture_texts)[:5],
+        )
+
     cache: dict = {}
     pages = []
     ocr_seconds = 0.0
@@ -272,6 +317,8 @@ def build_pages(
 
         for block in page_blocks:
             try:
+                if block.get("type") in _FURNITURE_BLOCK_TYPES:
+                    continue
                 if _needs_ocr(block):
                     if ocr is None:
                         continue
@@ -287,7 +334,7 @@ def build_pages(
                     parts.append(_format_ocr_block(text))
                 else:
                     text = _text_of(block)
-                    if text:
+                    if text and text not in furniture_texts:
                         parts.append(text)
             except Exception as e:
                 logger.warning(
