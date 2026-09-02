@@ -41,17 +41,24 @@ PDF 파싱·OCR이 전부 자체 호스팅된다.
 | 영역 | 채택 기술 | 버전 | 비고 |
 |---|---|---|---|
 | 웹 프레임워크 | FastAPI + Uvicorn | 0.109.0 / 0.27.0 | |
-| 설정·검증 | Pydantic / pydantic-settings | 2.5.0 / 2.1.0 | `.env` 로딩 |
-| RAG 오케스트레이션 | LangChain / langchain-community | 0.1.20 / 0.0.38 | 0.1.x 라인 유지 |
+| 설정·검증 | Pydantic / pydantic-settings | 2.13.5 / 2.15.0 | `.env` 로딩 |
+| RAG 오케스트레이션 | LangChain / langchain-community | 1.3.18 / 0.4.2 | 현행 1.x 라인 |
+| LLM 클라이언트 | langchain-ollama | 1.1.0 | community에서 이관됨 |
+| 레거시 체인 shim | langchain-classic | 1.0.8 | 한시적 — LCEL 재작성에서 제거 |
 | 벡터 DB | ChromaDB | 0.4.22 | 로컬 영속 |
 | 임베딩 | sentence-transformers + `nlpai-lab/KURE-v1` | 3.3.1 | 한국어 특화 |
 | LLM | Ollama (`gemma4:26b-a4b-it-q4_K_M`) | — | HTTP 원격 호출 |
 | PDF 파싱 | MinerU (HTTP 서비스) | — | 레이아웃·표·수식 |
 | OCR | PaddleOCR + PaddlePaddle | 3.7.0 / 3.2.2 | 한국어 인식 모델 |
 | PDF 폴백 | pypdf / PyMuPDF | 4.0.0 / 1.28.2 | MinerU 실패 시 |
-| 테스트 | pytest | 7.4.4 | 149개 |
+| 테스트 | pytest | 7.4.4 | 168개 |
 
 `langchain-experimental`은 **의존성에 없다.** 시멘틱 청킹을 직접 포팅했기 때문이다(§4.4).
+
+`langchain-classic`은 아직 남아 있는 `ConversationalRetrievalChain`과
+`ConversationBufferMemory`를 위한 **한시적 발판**이다. LangChain 1.x는 이 둘을
+본체에서 제거했고, LCEL 재작성이 끝나면 이 의존성도 사라진다. 배경은
+[LangChain 1.x 마이그레이션 설계](docs/superpowers/specs/2026-09-02-langchain-1x-migration-design.md).
 
 ### 프론트엔드 (`frontend/package.json`)
 
