@@ -180,10 +180,21 @@ class RAGService:
             raise
 
     def _format_sources(self, source_docs: list) -> list[SourceDocument]:
-        """Format source documents for response."""
+        """Format source documents for response.
+
+        리트리버가 컨텍스트 배치용으로 순서를 바꿨더라도(ScoringRetriever.reorder)
+        사용자에게 보여줄 출처는 관련성이 높은 순서여야 하므로 점수로 되돌린다.
+        """
         formatted_sources = []
 
-        for doc in source_docs:
+        # 점수가 없는 문서(리트리버를 거치지 않은 경우)는 0.0으로 취급해 맨 뒤로.
+        ordered_docs = sorted(
+            source_docs,
+            key=lambda doc: doc.metadata.get("similarity_score") or 0.0,
+            reverse=True,
+        )
+
+        for doc in ordered_docs:
             document_id = doc.metadata.get("document_id", "")
             # Chroma metadata can only hold scalars, so image_ids is stored as a
             # comma-joined string (document_processor.load_pdf); split it back out.

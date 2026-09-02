@@ -77,3 +77,43 @@ def test_missing_similarity_score_is_none_not_zero():
     sources = _format([doc])
 
     assert sources[0].similarity_score is None
+
+
+def test_sources_are_sorted_by_score_even_when_input_was_reordered():
+    """리트리버가 재배치한 순서로 들어와도 출처는 관련성 순으로 보인다."""
+    docs = [
+        Document(page_content="중간", metadata={
+            "filename": "a.pdf", "document_id": "doc_1",
+            "chunk_index": 1, "similarity_score": 0.62,
+        }),
+        Document(page_content="최고", metadata={
+            "filename": "a.pdf", "document_id": "doc_1",
+            "chunk_index": 0, "similarity_score": 0.91,
+        }),
+        Document(page_content="최저", metadata={
+            "filename": "a.pdf", "document_id": "doc_1",
+            "chunk_index": 2, "similarity_score": 0.30,
+        }),
+    ]
+
+    sources = _format(docs)
+
+    assert [s.content for s in sources] == ["최고", "중간", "최저"]
+    assert [s.similarity_score for s in sources] == [0.91, 0.62, 0.30]
+
+
+def test_missing_similarity_score_sorts_last_without_crashing():
+    """리트리버를 거치지 않고 들어온 문서가 정렬을 깨뜨리지 않아야 한다."""
+    docs = [
+        Document(page_content="점수 없음", metadata={
+            "filename": "a.pdf", "document_id": "doc_1", "chunk_index": 0,
+        }),
+        Document(page_content="점수 있음", metadata={
+            "filename": "a.pdf", "document_id": "doc_1",
+            "chunk_index": 1, "similarity_score": 0.40,
+        }),
+    ]
+
+    sources = _format(docs)
+
+    assert [s.content for s in sources] == ["점수 있음", "점수 없음"]
