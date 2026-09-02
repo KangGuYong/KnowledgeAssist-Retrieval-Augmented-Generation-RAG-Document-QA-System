@@ -1,7 +1,8 @@
 # LangChain 1.x 마이그레이션
 
 - 작성일: 2026-09-02
-- 상태: 설계 검토 대기
+- 상태: 0·1단계 구현 완료 (`24c71d6`, `8f892f7`, `8c70c6b`). 2단계는
+  [LCEL 재작성](2026-09-02-lcel-rewrite-design.md)으로 분리됨
 - 관련 코드: `requirements.txt`, `rag_service.py`, `vector_store.py`, `document_processor.py`, `chunking.py`, `config.py`
 - 선행 작업: [검색 결과 재배치](2026-09-02-search-result-reordering-design.md)
 
@@ -128,7 +129,7 @@ OSV API 조회 결과(2026-09-02 기준):
 |---|---|---|
 | **0** | `pydantic` / `pydantic-settings` 범프만 | 코드 변경 없이 전체 테스트 통과 |
 | **1** | LangChain 1.3.18 + `langchain-classic`로 **import만 이동** | 체인 로직 무변경, 기존 테스트 그대로 통과 |
-| **2** | `ConversationalRetrievalChain` → LCEL 재작성, `langchain-classic` 제거 | 별도 설계 문서로 분리 |
+| **2** | `ConversationalRetrievalChain` → LCEL 재작성, `langchain-classic` 제거 | [LCEL 재작성 설계](2026-09-02-lcel-rewrite-design.md) |
 
 이 문서는 **0단계와 1단계**를 다룬다. 2단계는 동작이 바뀔 수 있으므로 범위에서
 제외한다(§4).
