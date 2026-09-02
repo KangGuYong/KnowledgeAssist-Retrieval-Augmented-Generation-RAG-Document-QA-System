@@ -187,10 +187,13 @@ class RAGService:
         """
         formatted_sources = []
 
-        # 점수가 없는 문서(리트리버를 거치지 않은 경우)는 0.0으로 취급해 맨 뒤로.
+        # 점수가 없는 문서(리트리버를 거치지 않은 경우)는 맨 뒤로 보낸다.
+        # 0.0이 아니라 -inf인 이유: 관련성 점수는 음수가 될 수 있다. Chroma
+        # 컬렉션이 hnsw:space 없이 만들어져 LangChain이 유클리드 변환식
+        # (1 - distance/sqrt(2))을 쓰기 때문이다.
         ordered_docs = sorted(
             source_docs,
-            key=lambda doc: doc.metadata.get("similarity_score") or 0.0,
+            key=lambda doc: doc.metadata.get("similarity_score") or float("-inf"),
             reverse=True,
         )
 

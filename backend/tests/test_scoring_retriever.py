@@ -54,23 +54,31 @@ def test_no_filter_passes_none_through():
     assert store.calls[0]["filter"] is None
 
 
-def test_reordering_moves_the_best_chunks_to_the_edges():
+@pytest.mark.parametrize(
+    "k, expected",
+    [
+        # 배포 설정값(backend/.env의 RETRIEVAL_K=5). 홀수라 1등이 맨 앞에 온다.
+        (5, ["1", "3", "5", "4", "2"]),
+        # 클래스 기본값. 짝수라 방향이 뒤집혀 1등이 맨 뒤로 간다.
+        (10, ["2", "4", "6", "8", "10", "9", "7", "5", "3", "1"]),
+    ],
+)
+def test_reordering_moves_the_best_chunks_to_the_edges(k, expected):
     """기본값(reorder=True)에서 관련성 높은 청크가 컨텍스트 양 끝으로 간다.
 
-    기대값은 retrieval_k와 같은 10개 기준이며, LongContextReorder의 실제
-    동작이다(tests/test_long_context_reorder.py가 이 계약을 고정한다).
+    방향은 k의 홀짝에 따라 뒤집히지만(LongContextReorder의 동작,
+    tests/test_long_context_reorder.py가 계약으로 고정한다) 양 끝에 상위 청크가
+    온다는 성질은 어느 쪽이든 유지된다. 배포값 5와 클래스 기본값 10을 모두 건다.
     """
     store = FakeVectorStore([
         (Document(page_content=str(i + 1), metadata={}), 1.0 - i * 0.01)
-        for i in range(10)
+        for i in range(k)
     ])
-    retriever = ScoringRetriever(vector_store=store, k=10)
+    retriever = ScoringRetriever(vector_store=store, k=k)
 
     docs = retriever.get_relevant_documents("질문")
 
-    assert [d.page_content for d in docs] == [
-        "2", "4", "6", "8", "10", "9", "7", "5", "3", "1"
-    ]
+    assert [d.page_content for d in docs] == expected
 
 
 def test_scores_survive_the_reordering():
