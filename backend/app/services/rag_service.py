@@ -1,11 +1,11 @@
-from langchain.callbacks.manager import CallbackManagerForRetrieverRun
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import PromptTemplate
-from langchain.schema import Document
-from langchain.schema.retriever import BaseRetriever
-from langchain_community.chat_models import ChatOllama
+from langchain_classic.chains import ConversationalRetrievalChain
+from langchain_classic.memory import ConversationBufferMemory
 from langchain_community.document_transformers import LongContextReorder
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from langchain_core.documents import Document
+from langchain_core.prompts import PromptTemplate
+from langchain_core.retrievers import BaseRetriever
+from langchain_ollama import ChatOllama
 from typing import Any, Dict, List, Optional
 import logging
 import uuid

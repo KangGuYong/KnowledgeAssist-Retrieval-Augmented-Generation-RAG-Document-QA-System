@@ -11,7 +11,7 @@ the bug lives in the third-party wrapper's plumbing.
 """
 
 import pytest
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
 from langchain_core.embeddings import FakeEmbeddings
 
