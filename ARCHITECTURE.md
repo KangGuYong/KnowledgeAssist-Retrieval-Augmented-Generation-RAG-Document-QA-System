@@ -38,27 +38,28 @@ PDF 파싱·OCR이 전부 자체 호스팅된다.
 
 ### 백엔드 (`backend/requirements.txt`)
 
-| 영역 | 채택 기술 | 버전 | 비고 |
-|---|---|---|---|
-| 웹 프레임워크 | FastAPI + Uvicorn | 0.109.0 / 0.27.0 | |
-| 설정·검증 | Pydantic / pydantic-settings | 2.13.5 / 2.15.0 | `.env` 로딩 |
-| RAG 오케스트레이션 | LangChain / langchain-community | 1.3.18 / 0.4.2 | 현행 1.x 라인 |
-| LLM 클라이언트 | langchain-ollama | 1.1.0 | community에서 이관됨 |
-| 레거시 체인 shim | langchain-classic | 1.0.8 | 한시적 — LCEL 재작성에서 제거 |
-| 벡터 DB | ChromaDB | 0.4.22 | 로컬 영속 |
-| 임베딩 | sentence-transformers + `nlpai-lab/KURE-v1` | 3.3.1 | 한국어 특화 |
-| LLM | Ollama (`gemma4:26b-a4b-it-q4_K_M`) | — | HTTP 원격 호출 |
-| PDF 파싱 | MinerU (HTTP 서비스) | — | 레이아웃·표·수식 |
-| OCR | PaddleOCR + PaddlePaddle | 3.7.0 / 3.2.2 | 한국어 인식 모델 |
-| PDF 폴백 | pypdf / PyMuPDF | 4.0.0 / 1.28.2 | MinerU 실패 시 |
-| 테스트 | pytest | 7.4.4 | 168개 |
+
+| 영역               | 채택 기술                                  | 버전             | 비고                           |
+| -------------------- | -------------------------------------------- | ------------------ | -------------------------------- |
+| 웹 프레임워크      | FastAPI + Uvicorn                          | 0.109.0 / 0.27.0 |                                |
+| 설정·검증         | Pydantic / pydantic-settings               | 2.13.5 / 2.15.0  | `.env` 로딩                    |
+| RAG 오케스트레이션 | LangChain / langchain-community            | 1.3.18 / 0.4.2   | 현행 1.x 라인                  |
+| LLM 클라이언트     | langchain-ollama                           | 1.1.0            | community에서 이관됨           |
+| 벡터 DB            | ChromaDB                                   | 0.4.22           | 로컬 영속                      |
+| 임베딩             | sentence-transformers + `nlpai-lab/KURE-v1` | 3.3.1            | 한국어 특화                    |
+| LLM                | Ollama (`gemma4:26b-a4b-it-q4_K_M`)        | —               | HTTP 원격 호출                 |
+| PDF 파싱           | MinerU (HTTP 서비스)                       | —               | 레이아웃·표·수식             |
+| OCR                | PaddleOCR + PaddlePaddle                   | 3.7.0 / 3.2.2    | 한국어 인식 모델               |
+| PDF 폴백           | pypdf / PyMuPDF                            | 4.0.0 / 1.28.2   | MinerU 실패 시                 |
+| 테스트             | pytest                                     | 7.4.4            | 175개                          |
 
 `langchain-experimental`은 **의존성에 없다.** 시멘틱 청킹을 직접 포팅했기 때문이다(§4.4).
 
-`langchain-classic`은 아직 남아 있는 `ConversationalRetrievalChain`과
-`ConversationBufferMemory`를 위한 **한시적 발판**이다. LangChain 1.x는 이 둘을
-본체에서 제거했고, LCEL 재작성이 끝나면 이 의존성도 사라진다. 배경은
-[LangChain 1.x 마이그레이션 설계](docs/superpowers/specs/2026-09-02-langchain-1x-migration-design.md).
+`langchain-classic`은 **우리 코드가 import하지 않는다.** LangChain 1.x가 본체에서
+제거한 레거시 체인을 담고 있어 한때 발판으로 썼으나, LCEL 재작성으로 걷어냈다.
+`langchain-community`가 계속 끌고 오는 전이 패키지로만 남는다. 배경은
+[LangChain 1.x 마이그레이션](docs/superpowers/specs/2026-09-02-langchain-1x-migration-design.md)과
+[LCEL 재작성](docs/superpowers/specs/2026-09-02-lcel-rewrite-design.md).
 
 ### 프론트엔드 (`frontend/package.json`)
 
@@ -103,16 +104,20 @@ MinerU 호출이 실패하면 예외를 삼키고 `PyPDFLoader`로 폴백한다.
 ```
 질문 + conversation_id + 선택된 document_ids
    │
-   ├─▶ ConversationalRetrievalChain
-   │     ├─ 1단계: 대화 이력 + 후속 질문 → 독립형 질문 재작성 (LLM 호출 #1)
+   ├─▶ RAGService.ask_question (LCEL)
+   │     ├─ 1단계: 대화 이력이 있을 때만 독립형 질문으로 재작성 (LLM 호출 #1)
    │     ├─ 2단계: ScoringRetriever로 유사도 검색 (k=10, document_id 필터)
-   │     └─ 3단계: StuffDocumentsChain에 QA_PROMPT로 컨텍스트 주입 (LLM 호출 #2)
+   │     └─ 3단계: page_content를 빈 줄로 이어 QA_PROMPT에 주입 (LLM 호출 #2)
    │
    └─▶ answer + sources[] (문서명·페이지·유사도 점수·이미지 URL)
 ```
 
-한 번의 질문에 **LLM이 두 번 호출된다**. 첫 호출은 "그가 하는 일은?" 같은 대명사
-의존 후속 질문을 검색 가능한 독립 질문으로 바꾸기 위한 것이다.
+한 번의 질문에 **LLM이 최대 두 번 호출된다**. 첫 호출은 "그가 하는 일은?" 같은
+대명사 의존 후속 질문을 검색 가능한 독립 질문으로 바꾸기 위한 것이며, **대화의 첫
+질문에서는 이력이 비어 있으므로 이 단계를 건너뛴다.**
+
+검색과 답변 모두 재작성된 질문을 쓴다. 컨텍스트에는 청크의 `page_content`만
+들어가고 문서명·페이지는 들어가지 않는다.
 
 ---
 
@@ -214,7 +219,7 @@ Chroma는 메타데이터 값으로 `str`/`int`/`float`/`bool`만 받는다. `No
 
 ### 4.8 대화 메모리는 인메모리
 
-`RAGService.conversation_memories`가 `conversation_id → ConversationBufferMemory`
+`RAGService.conversation_histories`가 `conversation_id → list[BaseMessage]`
 딕셔너리를 들고 있다. **프로세스가 재시작되면 전부 사라지고, 워커를 여러 개 띄우면
 공유되지 않는다.**
 
@@ -237,17 +242,18 @@ OCR을 한 번만 수행하고 결과를 캐시한다.
 
 ## 6. API
 
-| 메서드 | 경로 | 설명 |
-|---|---|---|
-| POST | `/api/v1/upload/` | 단일 파일 업로드·처리 |
-| POST | `/api/v1/upload/batch` | 다중 업로드 (실패해도 나머지 계속 진행) |
-| POST | `/api/v1/chat/` | 질의 → 답변 + 출처 |
-| DELETE | `/api/v1/chat/conversation/{id}` | 대화 이력 삭제 |
-| GET | `/api/v1/documents/parsed` | 파싱된 문서 목록 **(실질적 문서 목록)** |
-| GET | `/api/v1/documents/{id}/parsed` | 페이지별 파싱 블록 상세 |
-| GET | `/api/v1/documents/{id}/images/{image_id}` | 추출 이미지 |
-| GET | `/api/v1/documents/` | 스텁 — 항상 `[]` |
-| DELETE | `/api/v1/documents/{id}` | 문서와 전 산출물 삭제 |
+
+| 메서드 | 경로                                       | 설명                                    |
+| -------- | -------------------------------------------- | ----------------------------------------- |
+| POST   | `/api/v1/upload/`                          | 단일 파일 업로드·처리                  |
+| POST   | `/api/v1/upload/batch`                     | 다중 업로드 (실패해도 나머지 계속 진행) |
+| POST   | `/api/v1/chat/`                            | 질의 → 답변 + 출처                     |
+| DELETE | `/api/v1/chat/conversation/{id}`           | 대화 이력 삭제                          |
+| GET    | `/api/v1/documents/parsed`                 | 파싱된 문서 목록 **(실질적 문서 목록)** |
+| GET    | `/api/v1/documents/{id}/parsed`            | 페이지별 파싱 블록 상세                 |
+| GET    | `/api/v1/documents/{id}/images/{image_id}` | 추출 이미지                             |
+| GET    | `/api/v1/documents/`                       | 스텁 — 항상 `[]`                       |
+| DELETE | `/api/v1/documents/{id}`                   | 문서와 전 산출물 삭제                   |
 
 Swagger UI: `http://localhost:8000/docs`
 
@@ -257,23 +263,24 @@ Swagger UI: `http://localhost:8000/docs`
 
 기본값은 `app/config.py`의 `Settings`에 있다. 자주 건드리는 값만 추린다.
 
-| 키 | 기본값 | 의미 |
-|---|---|---|
-| `llm_model` | `gemma4:26b-a4b-it-q4_K_M` | Ollama 모델명 |
-| `ollama_base_url` | `http://192.168.0.169:11434` | **원격 호스트 기본값** |
-| `embedding_model` | `nlpai-lab/KURE-v1` | 임베딩 모델 |
-| `embedding_device` | `cuda` | `cpu`로 바꾸면 크게 느려짐 |
-| `retrieval_k` | `10` | 검색할 청크 수 |
-| `chunk_size` / `chunk_overlap` | `1000` / `200` | 페이지 병합 목표 크기도 겸함 |
-| `chunking_strategy` | `default` | `default` \| `semantic` |
-| `semantic_chunker_breakpoint_percentile` | `95.0` | 경계 임계 백분위 |
-| `semantic_chunker_min_chunk_chars` | `200` | 최소 청크 길이 |
-| `max_documents` | `10` | 동시 보유 문서 수 상한 |
-| `max_upload_size` | `10MB` | |
-| `mineru_base_url` | `http://127.0.0.1:8100` | |
-| `mineru_lang_list` | `["korean"]` | |
-| `ocr_device` | `cpu` | PaddleOCR 실행 디바이스 |
-| `ocr_isolate_process` | `true` | §4.2 — 끄면 segfault 위험 |
+
+| 키                                       | 기본값                       | 의미                         |
+| ------------------------------------------ | ------------------------------ | ------------------------------ |
+| `llm_model`                              | `gemma4:26b-a4b-it-q4_K_M`   | Ollama 모델명                |
+| `ollama_base_url`                        | `http://192.168.0.169:11434` | **원격 호스트 기본값**       |
+| `embedding_model`                        | `nlpai-lab/KURE-v1`          | 임베딩 모델                  |
+| `embedding_device`                       | `cuda`                       | `cpu`로 바꾸면 크게 느려짐   |
+| `retrieval_k`                            | `10`                         | 검색할 청크 수               |
+| `chunk_size` / `chunk_overlap`           | `1000` / `200`               | 페이지 병합 목표 크기도 겸함 |
+| `chunking_strategy`                      | `default`                    | `default` \| `semantic`      |
+| `semantic_chunker_breakpoint_percentile` | `95.0`                       | 경계 임계 백분위             |
+| `semantic_chunker_min_chunk_chars`       | `200`                        | 최소 청크 길이               |
+| `max_documents`                          | `10`                         | 동시 보유 문서 수 상한       |
+| `max_upload_size`                        | `10MB`                       |                              |
+| `mineru_base_url`                        | `http://127.0.0.1:8100`      |                              |
+| `mineru_lang_list`                       | `["korean"]`                 |                              |
+| `ocr_device`                             | `cpu`                        | PaddleOCR 실행 디바이스      |
+| `ocr_isolate_process`                    | `true`                       | §4.2 — 끄면 segfault 위험  |
 
 `ollama_base_url` 기본값이 사설 IP이므로 단독 실행 시 반드시 `.env`에서 덮어써야 한다.
 

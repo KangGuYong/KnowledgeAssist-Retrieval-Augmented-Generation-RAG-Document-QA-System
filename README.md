@@ -62,7 +62,6 @@ question + conversation history
 | Settings & validation | Pydantic / pydantic-settings | 2.13.5 / 2.15.0 |
 | RAG orchestration | LangChain / langchain-community | 1.3.18 / 0.4.2 |
 | LLM client | langchain-ollama | 1.1.0 |
-| Legacy chain shim | langchain-classic | 1.0.8 |
 | Vector store | ChromaDB | 0.4.22 |
 | Embeddings | sentence-transformers + `nlpai-lab/KURE-v1` | 3.3.1 |
 | LLM | Ollama (`gemma4:26b-a4b-it-q4_K_M`) | — |
@@ -74,9 +73,10 @@ question + conversation history
 Semantic chunking is a direct port of the "5 Levels of Text Splitting" notebook
 (Level 4) rather than `langchain-experimental`, which is therefore not a dependency.
 
-`langchain-classic` is a temporary foothold for the `ConversationalRetrievalChain`
-and `ConversationBufferMemory` that LangChain 1.x dropped from the main package.
-It goes away once the pipeline is rewritten in LCEL.
+`langchain-classic` is not imported by this project. It holds the legacy chains
+LangChain 1.x dropped from the main package and served as a migration foothold;
+the LCEL rewrite removed it, and it now only rides along as a transitive
+dependency of `langchain-community`.
 
 ### Frontend
 
