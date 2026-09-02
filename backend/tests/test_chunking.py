@@ -145,3 +145,156 @@ def test_split_text_with_a_single_sentence_returns_it_unsplit():
     splitter = SemanticChunker(FakeEmbeddings(size=4))
 
     assert splitter.split_text("혼자인 문장.") == ["혼자인 문장."]
+
+
+# --- Chunks must not be trapped inside one page --------------------------
+#
+# A 545-page large-print PDF held ~200 characters per page. Because both
+# splitters work one Document at a time and load_pdf() emits one Document per
+# page, chunk_size=1000 was never reachable: the median chunk came out at 158
+# characters, and the semantic percentile was being computed over the two or
+# three sentence distances a single page happened to contain.
+
+
+def _page(text, page_number, **metadata):
+    return Document(
+        page_content=text,
+        metadata={
+            "page": page_number - 1,
+            "page_number": page_number,
+            "source": "/tmp/book.pdf",
+            "filename": "book.pdf",
+            **metadata,
+        },
+    )
+
+
+def test_merge_pages_combines_small_pages_up_to_the_target_size():
+    from app.services.chunking import merge_pages
+
+    pages = [_page("가" * 100, i) for i in range(1, 11)]
+
+    merged = merge_pages(pages, target_size=400)
+
+    assert len(merged) < len(pages)
+    assert all(len(m.page_content) >= 400 for m in merged[:-1])
+
+
+def test_merge_pages_keeps_the_first_pages_metadata_and_records_the_span():
+    from app.services.chunking import merge_pages
+
+    pages = [_page("나" * 100, i) for i in range(3, 8)]
+
+    merged = merge_pages(pages, target_size=400)
+
+    assert merged[0].metadata["page_number"] == 3
+    assert merged[0].metadata["page"] == 2
+    assert merged[0].metadata["page_number_end"] == 6
+
+
+def test_merge_pages_unions_image_ids_and_ocr_flags_across_merged_pages():
+    """Source citations render images from image_ids, so merging pages must
+    carry every merged page's images rather than only the first page's."""
+    from app.services.chunking import merge_pages
+
+    pages = [
+        _page("다" * 100, 1, image_ids="aaa", ocr_used=True, ocr_image_count=1),
+        _page("라" * 100, 2, image_ids="bbb,ccc", ocr_used=False, ocr_image_count=0),
+    ]
+
+    merged = merge_pages(pages, target_size=1000)
+
+    assert len(merged) == 1
+    assert merged[0].metadata["image_ids"] == "aaa,bbb,ccc"
+    assert merged[0].metadata["ocr_used"] is True
+    assert merged[0].metadata["ocr_image_count"] == 1
+
+
+def test_merge_pages_never_merges_across_two_source_files():
+    from app.services.chunking import merge_pages
+
+    pages = [
+        _page("마" * 50, 1, source="/tmp/a.pdf"),
+        _page("바" * 50, 1, source="/tmp/b.pdf"),
+    ]
+
+    merged = merge_pages(pages, target_size=1000)
+
+    assert len(merged) == 2
+
+
+def test_merge_pages_leaves_pages_that_already_reach_the_target_alone():
+    from app.services.chunking import merge_pages
+
+    pages = [_page("사" * 1200, i) for i in range(1, 4)]
+
+    merged = merge_pages(pages, target_size=1000)
+
+    assert len(merged) == 3
+
+
+def test_semantic_breakpoint_threshold_is_computed_across_all_documents():
+    """Per-document percentiles are meaningless on a page holding two or three
+    sentences - the threshold is relative, so a page with no topic shift gets
+    split anyway. One threshold over the whole document fixes that."""
+    calm = Document(page_content="가 하나. 가 둘. 가 셋.", metadata={"page": 0})
+    shifting = Document(page_content="나 하나. 나 둘. 나 셋.", metadata={"page": 1})
+    # calm's largest gap is small; shifting's last gap is orthogonal. A global
+    # 95th percentile sits above calm's gaps, so only shifting breaks.
+    embeddings = _FixedEmbeddings(
+        [[1, 0], [1, 0.01], [1, 0.5]] + [[1, 0], [1, 0], [0, 1]]
+    )
+    splitter = SemanticChunker(embeddings, buffer_size=1, breakpoint_percentile=95.0)
+
+    chunks = splitter.split_documents([calm, shifting])
+
+    from_calm = [c for c in chunks if c.metadata.get("page") == 0]
+    from_shifting = [c for c in chunks if c.metadata.get("page") == 1]
+    assert len(from_calm) == 1, "no topic shift here - must not be split"
+    assert len(from_shifting) == 2
+
+
+def test_semantic_chunker_does_not_emit_chunks_below_the_minimum_size():
+    """192 of the 1081 stored chunks were under 50 characters and five held
+    nothing but a page number."""
+    # Distances 1.0 and ~0.9 against a 50th-percentile threshold of ~0.95:
+    # the first gap is a breakpoint, but honouring it would emit a 3-character
+    # chunk, so it has to be carried into the next one instead.
+    embeddings = _FixedEmbeddings([[1, 0], [0, 1], [1, 0.1]])
+    splitter = SemanticChunker(
+        embeddings, buffer_size=1, breakpoint_percentile=50.0, min_chunk_chars=200
+    )
+
+    chunks = splitter.split_text("짧다. 또 짧다. 여전히 짧다.")
+
+    assert len(chunks) == 1
+
+
+def test_min_chunk_chars_defaults_to_zero_so_the_notebook_port_is_unchanged():
+    splitter = SemanticChunker(FakeEmbeddings(size=4))
+
+    assert splitter.min_chunk_chars == 0
+
+
+def test_semantic_splitter_from_the_factory_uses_the_configured_minimum():
+    from app.config import get_settings
+
+    splitter = build_splitter("semantic", embeddings=FakeEmbeddings(size=8))
+
+    assert splitter.min_chunk_chars == get_settings().semantic_chunker_min_chunk_chars
+
+
+def test_chunk_documents_merges_tiny_pages_before_splitting():
+    """End to end: 40 pages of ~60 characters must not yield 40 tiny chunks."""
+    from app.services.document_processor import DocumentProcessor
+
+    pages = [_page("가나다라마바사아자차. " * 5, i) for i in range(1, 41)]
+
+    chunks = DocumentProcessor().chunk_documents(
+        pages, "book.pdf", chunking_strategy="default", chunk_size=1000, chunk_overlap=100
+    )
+
+    assert len(chunks) < len(pages)
+    assert max(len(c.page_content) for c in chunks) > 500
+    assert chunks[0].metadata["page_number"] == 1
+    assert chunks[0].metadata["filename"] == "book.pdf"

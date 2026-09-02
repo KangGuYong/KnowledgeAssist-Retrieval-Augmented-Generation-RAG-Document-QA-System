@@ -6,7 +6,7 @@ document_id와 image_id는 사용자 입력이 파일 경로가 되는 지점이
 import pytest
 from fastapi import HTTPException
 
-from app.api.routes.documents import delete_document_images, resolve_image_path
+from app.api.routes.documents import delete_document_images, delete_uploaded_file, resolve_image_path
 
 
 def test_valid_ids_resolve_inside_storage_root(tmp_path):
@@ -73,3 +73,33 @@ def test_delete_with_unsafe_id_is_a_noop(tmp_path):
 
 def test_delete_when_directory_absent_does_not_raise(tmp_path):
     delete_document_images("doc_never_existed", tmp_path / "images")
+
+
+def test_delete_uploaded_file_removes_the_matching_file(tmp_path):
+    root = tmp_path / "uploads"
+    root.mkdir(parents=True)
+    (root / "doc_abc123_report (final).pdf").write_bytes(b"pdf")
+    (root / "doc_other_report.pdf").write_bytes(b"pdf")
+
+    delete_uploaded_file("doc_abc123", root)
+
+    assert not (root / "doc_abc123_report (final).pdf").exists()
+    assert (root / "doc_other_report.pdf").exists()  # 다른 문서는 건드리지 않는다
+
+
+def test_delete_uploaded_file_with_unsafe_id_is_a_noop(tmp_path):
+    root = tmp_path / "uploads"
+    root.mkdir(parents=True)
+    (root / "keep_file.pdf").write_bytes(b"pdf")
+
+    delete_uploaded_file("../", root)
+
+    assert (root / "keep_file.pdf").exists()
+
+
+def test_delete_uploaded_file_when_absent_does_not_raise(tmp_path):
+    delete_uploaded_file("doc_never_existed", tmp_path / "uploads")
+
+
+def test_delete_uploaded_file_when_dir_absent_does_not_raise(tmp_path):
+    delete_uploaded_file("doc_never_existed", tmp_path / "missing")

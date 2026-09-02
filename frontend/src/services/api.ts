@@ -22,7 +22,7 @@ const API_PREFIX = '/api/v1';
 const DEFAULT_TIMEOUT = 30_000;
 // Chat and upload wait on the LLM and the embedding model, which routinely take
 // tens of seconds and can cold-start much slower.
-const LLM_TIMEOUT = 300_000;
+const LLM_TIMEOUT = 600_000;
 
 class ApiService {
   private client: AxiosInstance;

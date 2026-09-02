@@ -85,3 +85,12 @@
   grid-column: 1 / -1;
   min-height: 0;
 }
+
+/* .sidebar/.chat-section/.app-main-full each set their own `display`,
+   which has the same specificity as [hidden] and is declared later - so
+   without this, [hidden] alone doesn't actually hide them. */
+.sidebar[hidden],
+.chat-section[hidden],
+.app-main-full[hidden] {
+  display: none;
+}

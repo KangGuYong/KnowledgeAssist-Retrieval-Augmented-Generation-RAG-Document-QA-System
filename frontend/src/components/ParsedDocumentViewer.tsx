@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { FileText } from 'lucide-react';
+import { FileText, Trash2 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { ParsedBlock, ParsedDocumentDetail, ParsedDocumentSummary } from '../types/api.types';
 import '../styles/ParsedDocumentViewer.css';
@@ -63,19 +63,46 @@ function ParsedBlockView({ documentId, block }: { documentId: string; block: Par
   return null;
 }
 
-export const ParsedDocumentViewer: React.FC = () => {
-  const [documents, setDocuments] = useState<ParsedDocumentSummary[]>([]);
+interface ParsedDocumentViewerProps {
+  /** 파싱된 문서 목록 - App.tsx가 단일 소스로 들고 있다. 뷰어가 목록을
+   * 따로 받아오면 업로드/삭제로 갱신되는 App의 목록과 어긋나서, 방금
+   * 올린 문서가 뷰어에 나타나지 않는다. */
+  documents: ParsedDocumentSummary[];
+  /** 목록을 불러오지 못했을 때의 메시지 */
+  loadError?: string | null;
+  /** 문서 삭제가 성공했을 때 알려준다 - 목록과 채팅용 선택 상태를 모두
+   * 들고 있는 App.tsx가 갱신을 처리한다. */
+  onDocumentDeleted: (documentId: string) => void;
+}
+
+export const ParsedDocumentViewer: React.FC<ParsedDocumentViewerProps> = ({
+  documents,
+  loadError,
+  onDocumentDeleted,
+}) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ParsedDocumentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    apiService
-      .getParsedDocuments()
-      .then(setDocuments)
-      .catch((err: Error) => setError(err.message));
-  }, []);
+  const handleDelete = async (e: React.MouseEvent, documentId: string, filename: string) => {
+    e.stopPropagation();
+    if (!window.confirm(`"${filename}" 문서를 삭제할까요? 되돌릴 수 없습니다.`)) return;
+
+    setDeletingId(documentId);
+    try {
+      await apiService.deleteDocument(documentId);
+      if (selectedId === documentId) {
+        setSelectedId(null);
+      }
+      onDocumentDeleted(documentId);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     if (!selectedId) {
@@ -98,14 +125,22 @@ export const ParsedDocumentViewer: React.FC = () => {
         {documents.length === 0 && <p className="parsed-viewer-empty">아직 파싱된 문서가 없습니다.</p>}
         <ul>
           {documents.map((doc) => (
-            <li key={doc.document_id}>
-              <button
-                className={doc.document_id === selectedId ? 'parsed-doc-item active' : 'parsed-doc-item'}
-                onClick={() => setSelectedId(doc.document_id)}
-              >
+            <li
+              key={doc.document_id}
+              className={doc.document_id === selectedId ? 'parsed-doc-item active' : 'parsed-doc-item'}
+            >
+              <button className="parsed-doc-select" onClick={() => setSelectedId(doc.document_id)}>
                 <FileText size={14} />
                 <span className="parsed-doc-filename">{doc.filename}</span>
                 <span className="parsed-doc-pages">{doc.page_count}p</span>
+              </button>
+              <button
+                className="parsed-doc-delete"
+                onClick={(e) => handleDelete(e, doc.document_id, doc.filename)}
+                disabled={deletingId === doc.document_id}
+                title="문서 삭제"
+              >
+                <Trash2 size={14} />
               </button>
             </li>
           ))}
@@ -113,7 +148,7 @@ export const ParsedDocumentViewer: React.FC = () => {
       </div>
 
       <div className="parsed-viewer-content">
-        {error && <p className="parsed-viewer-error">{error}</p>}
+        {(error ?? loadError) && <p className="parsed-viewer-error">{error ?? loadError}</p>}
         {loading && <p>불러오는 중...</p>}
         {!loading && !error && !detail && <p className="parsed-viewer-empty">왼쪽에서 문서를 선택하세요.</p>}
         {detail &&

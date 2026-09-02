@@ -28,3 +28,17 @@ def test_qa_prompt_warns_about_ocr_marker():
     assert "[이미지 텍스트]" in QA_PROMPT.template
     assert "{context}" in QA_PROMPT.template
     assert "{question}" in QA_PROMPT.template
+
+
+def test_retrieval_reorder_is_enabled_by_default():
+    """Lost in the Middle 완화는 기본으로 켜져 있고, 끌 수 있어야 한다."""
+    settings = Settings(_env_file=None)
+
+    assert settings.retrieval_reorder is True
+
+
+def test_qa_prompt_does_not_claim_the_context_is_relevance_ordered():
+    """재배치 후에는 컨텍스트가 관련성 순이 아니므로 그렇게 말하면 안 된다."""
+    from app.services.rag_service import QA_PROMPT
+
+    assert "관련성 순" not in QA_PROMPT.template

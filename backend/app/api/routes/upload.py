@@ -1,6 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 from pathlib import Path
 import aiofiles
+import re
+import time
 import uuid
 import logging
 from typing import List, Optional
@@ -18,6 +20,48 @@ router = APIRouter()
 # Initialize services
 doc_processor = DocumentProcessor()
 vector_service = VectorStoreService()
+
+_DOCUMENT_ID_PREFIX = re.compile(r"^(doc_[0-9a-f]{12})_")
+
+
+def _count_existing_documents(upload_dir: Path) -> int:
+    """Count distinct documents currently in the system.
+
+    Uses upload_dir as the source of truth (one file per document, named
+    "{document_id}_{filename}") rather than querying Chroma or the
+    parsed-result store - this codebase already treats storage directories
+    as ad-hoc registries elsewhere (see documents.py's list_parsed_documents),
+    and upload_dir is the only one guaranteed to have an entry for every
+    successfully uploaded document regardless of file type or parse status.
+    """
+    if not upload_dir.is_dir():
+        return 0
+
+    document_ids = set()
+    for path in upload_dir.iterdir():
+        if not path.is_file():
+            continue
+        match = _DOCUMENT_ID_PREFIX.match(path.name)
+        if match:
+            document_ids.add(match.group(1))
+
+    return len(document_ids)
+
+
+def _enforce_document_cap(upload_dir: Path) -> None:
+    """Raise 400 if the system is already at settings.max_documents.
+
+    Called before any file I/O in _process_upload, so a rejected upload
+    never touches disk.
+    """
+    if _count_existing_documents(upload_dir) >= settings.max_documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Maximum of {settings.max_documents} documents already uploaded. "
+                "Delete an existing document before uploading a new one."
+            ),
+        )
 
 
 async def _process_upload(
@@ -49,6 +93,9 @@ async def _process_upload(
             detail=f"File type {file_extension} not supported. Allowed: {settings.allowed_extensions}"
         )
 
+    # Enforce the total-document cap before doing any real work
+    _enforce_document_cap(Path(settings.upload_dir))
+
     # Validate file size
     file.file.seek(0, 2)  # Seek to end
     file_size = file.file.tell()
@@ -68,6 +115,7 @@ async def _process_upload(
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = upload_dir / f"{document_id}_{file.filename}"
+    total_start = time.perf_counter()
 
     try:
         # Save uploaded file
@@ -88,7 +136,17 @@ async def _process_upload(
         )
 
         # Add to vector store
+        embed_start = time.perf_counter()
         vector_service.add_documents(chunks, document_id)
+        logger.info(
+            "[TIMING] Embedding + vector store: %.2fs, %d chunk(s) - %s",
+            time.perf_counter() - embed_start, len(chunks), file.filename,
+        )
+
+        logger.info(
+            "[TIMING] Total upload processing: %.2fs - %s (%s)",
+            time.perf_counter() - total_start, file.filename, document_id,
+        )
 
         return UploadResponse(
             document_id=document_id,

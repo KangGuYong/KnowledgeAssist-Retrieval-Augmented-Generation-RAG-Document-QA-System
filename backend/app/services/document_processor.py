@@ -6,10 +6,11 @@ from langchain_community.document_loaders import (
 )
 from pathlib import Path
 import logging
+import time
 from typing import Optional
 
 from app.config import get_settings
-from app.services.chunking import build_splitter
+from app.services.chunking import build_splitter, merge_pages
 from app.services.mineru_client import PdfPage, parse_and_build_pages
 from app.services import parsed_store
 
@@ -118,6 +119,7 @@ class DocumentProcessor:
             List of Document objects
         """
         file_extension = Path(filename).suffix.lower()
+        start = time.perf_counter()
 
         try:
             if file_extension == ".pdf":
@@ -128,7 +130,10 @@ class DocumentProcessor:
                 documents = Docx2txtLoader(file_path).load()
             else:
                 raise ValueError(f"Unsupported file type: {file_extension}")
-            logger.info(f"Loaded {len(documents)} pages from {filename}")
+            logger.info(
+                "[TIMING] Document load (%s): %.2fs, %d page(s) - %s",
+                file_extension, time.perf_counter() - start, len(documents), filename,
+            )
 
             # Add filename to metadata
             for doc in documents:
@@ -167,8 +172,14 @@ class DocumentProcessor:
         resolved_chunk_size = chunk_size if chunk_size is not None else settings.chunk_size
         resolved_chunk_overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
 
+        start = time.perf_counter()
         splitter = build_splitter(strategy, resolved_chunk_size, resolved_chunk_overlap)
-        chunks = splitter.split_documents(documents)
+        # Neither splitter merges across Documents, and load_document() emits
+        # one per page, so without this a chunk can never outgrow a page - on a
+        # large-print PDF that capped chunks at a fraction of chunk_size.
+        merged = merge_pages(documents, resolved_chunk_size)
+        chunks = splitter.split_documents(merged)
+        elapsed = time.perf_counter() - start
 
         for idx, chunk in enumerate(chunks):
             chunk.metadata["chunk_index"] = idx
@@ -182,7 +193,10 @@ class DocumentProcessor:
                 chunk.metadata["chunk_size"] = resolved_chunk_size
                 chunk.metadata["chunk_overlap"] = resolved_chunk_overlap
 
-        logger.info(f"Created {len(chunks)} chunks from {filename} using {strategy} chunking")
+        logger.info(
+            "[TIMING] Chunking (%s): %.2fs, %d page(s) merged into %d, %d chunk(s) - %s",
+            strategy, elapsed, len(documents), len(merged), len(chunks), filename,
+        )
         return chunks
 
     def process_file(

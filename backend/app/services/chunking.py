@@ -70,12 +70,84 @@ def _cosine_distances(embeddings: List[List[float]]) -> List[float]:
     return distances
 
 
+def _merge_group(group: List[Document]) -> Document:
+    """Fold a run of page Documents into one, keeping their provenance.
+
+    The first page's metadata wins so citations still point at where the
+    chunk starts, but anything the source view needs from the later pages -
+    their images, their OCR flags - has to be carried across too, or a
+    merged chunk would silently lose the figures it quotes.
+    """
+    metadata = dict(group[0].metadata)
+
+    if "page_number" in group[-1].metadata:
+        metadata["page_number_end"] = group[-1].metadata["page_number"]
+
+    if any("image_ids" in doc.metadata for doc in group):
+        image_ids: List[str] = []
+        for doc in group:
+            for image_id in (doc.metadata.get("image_ids") or "").split(","):
+                if image_id and image_id not in image_ids:
+                    image_ids.append(image_id)
+        metadata["image_ids"] = ",".join(image_ids)
+
+    if any("ocr_used" in doc.metadata for doc in group):
+        metadata["ocr_used"] = any(doc.metadata.get("ocr_used") for doc in group)
+    if any("ocr_image_count" in doc.metadata for doc in group):
+        metadata["ocr_image_count"] = sum(doc.metadata.get("ocr_image_count") or 0 for doc in group)
+    if any("full_page_ocr" in doc.metadata for doc in group):
+        metadata["full_page_ocr"] = any(doc.metadata.get("full_page_ocr") for doc in group)
+
+    return Document(
+        page_content="\n\n".join(doc.page_content for doc in group), metadata=metadata
+    )
+
+
+def merge_pages(documents: List[Document], target_size: int) -> List[Document]:
+    """Join consecutive pages of the same file until they reach target_size.
+
+    Both splitters work one Document at a time and never merge across them,
+    while load_pdf() emits one Document per page. On a large-print PDF
+    holding ~200 characters per page that capped every chunk at a fraction of
+    chunk_size, and left the semantic percentile to be computed over the two
+    or three sentence distances one page happened to contain. Merging first
+    means a chunk is bounded by the requested size rather than by the
+    document's page layout.
+    """
+    merged: List[Document] = []
+    group: List[Document] = []
+
+    for doc in documents:
+        if group and doc.metadata.get("source") != group[0].metadata.get("source"):
+            merged.append(_merge_group(group))
+            group = []
+
+        group.append(doc)
+        # "\n\n" between pages, matching how _merge_group joins them.
+        size = sum(len(d.page_content) for d in group) + 2 * (len(group) - 1)
+        if size >= target_size:
+            merged.append(_merge_group(group))
+            group = []
+
+    if group:
+        merged.append(_merge_group(group))
+
+    return merged
+
+
 class SemanticChunker:
     """Splits text into chunks at embedding-similarity breakpoints.
 
     Any distance above the given percentile of all consecutive-sentence
     distances is treated as a breakpoint (notebook cell 102) - the notebook's
     only tunable parameter.
+
+    min_chunk_chars is this port's one addition, defaulting to 0 so the
+    notebook's behaviour is what you get unless you ask for otherwise: a
+    breakpoint that would emit a chunk shorter than it is carried into the
+    next chunk instead. Without it a run of short lines produces chunks too
+    small to answer anything - the worst offenders in practice being chunks
+    holding nothing but a page number.
     """
 
     def __init__(
@@ -83,18 +155,44 @@ class SemanticChunker:
         embeddings: Embeddings,
         buffer_size: int = 1,
         breakpoint_percentile: float = 95.0,
+        min_chunk_chars: int = 0,
     ):
         self.embeddings = embeddings
         self.buffer_size = buffer_size
         self.breakpoint_percentile = breakpoint_percentile
+        self.min_chunk_chars = min_chunk_chars
+
+    def _sentences(self, text: str) -> List[dict]:
+        single_sentences = _SENTENCE_SPLIT_RE.split(text)
+        sentences = [{"sentence": s, "index": i} for i, s in enumerate(single_sentences)]
+        return _combine_sentences(sentences, self.buffer_size)
+
+    def _chunks_from(self, sentences: List[dict], distances: List[float], threshold: float) -> List[str]:
+        chunks: List[str] = []
+        start = 0
+        for i, distance in enumerate(distances):
+            if distance <= threshold:
+                continue
+            candidate = " ".join(s["sentence"] for s in sentences[start:i + 1])
+            if len(candidate) < self.min_chunk_chars:
+                continue  # too small to stand alone - keep reading past this breakpoint
+            chunks.append(candidate)
+            start = i + 1
+
+        if start < len(sentences):
+            tail = " ".join(s["sentence"] for s in sentences[start:])
+            # A leftover tail below the minimum belongs to the chunk before it;
+            # there is no following chunk to carry it into.
+            if chunks and len(tail) < self.min_chunk_chars:
+                chunks[-1] = chunks[-1] + " " + tail
+            else:
+                chunks.append(tail)
+        return chunks
 
     def split_text(self, text: str) -> List[str]:
-        single_sentences = _SENTENCE_SPLIT_RE.split(text)
-        if len(single_sentences) <= 1:
-            return single_sentences
-
-        sentences = [{"sentence": s, "index": i} for i, s in enumerate(single_sentences)]
-        sentences = _combine_sentences(sentences, self.buffer_size)
+        sentences = self._sentences(text)
+        if len(sentences) <= 1:
+            return [s["sentence"] for s in sentences]
 
         embeddings = self.embeddings.embed_documents(
             [s["combined_sentence"] for s in sentences]
@@ -103,23 +201,41 @@ class SemanticChunker:
         if not distances:
             return [s["sentence"] for s in sentences]
 
-        threshold = np.percentile(distances, self.breakpoint_percentile)
-        breakpoints = [i for i, d in enumerate(distances) if d > threshold]
-
-        chunks = []
-        start = 0
-        for index in breakpoints:
-            chunks.append(" ".join(s["sentence"] for s in sentences[start:index + 1]))
-            start = index + 1
-        if start < len(sentences):
-            chunks.append(" ".join(s["sentence"] for s in sentences[start:]))
-        return chunks
+        return self._chunks_from(sentences, distances, np.percentile(distances, self.breakpoint_percentile))
 
     def split_documents(self, documents: List[Document]) -> List[Document]:
-        """Split documents, carrying each parent's metadata onto every chunk."""
+        """Split documents, carrying each parent's metadata onto every chunk.
+
+        The breakpoint threshold is a percentile, i.e. a relative measure, so
+        it is computed once over every document's distances rather than per
+        document. Computing it per document forces roughly the same number of
+        breaks into each one no matter what it contains, which on short
+        documents means splitting text that has no topic shift at all.
+        Chunks still never span two documents - only the threshold is shared.
+        """
+        per_document = [(doc, self._sentences(doc.page_content)) for doc in documents]
+        combined = [s["combined_sentence"] for _, sentences in per_document for s in sentences]
+        if not combined:
+            return []
+
+        embeddings = self.embeddings.embed_documents(combined)
+
+        offset = 0
+        per_document_distances = []
+        for _, sentences in per_document:
+            per_document_distances.append(_cosine_distances(embeddings[offset:offset + len(sentences)]))
+            offset += len(sentences)
+
+        all_distances = [d for distances in per_document_distances for d in distances]
+        threshold = (
+            np.percentile(all_distances, self.breakpoint_percentile)
+            if all_distances
+            else float("inf")
+        )
+
         result = []
-        for doc in documents:
-            for chunk_text in self.split_text(doc.page_content):
+        for (doc, sentences), distances in zip(per_document, per_document_distances):
+            for chunk_text in self._chunks_from(sentences, distances, threshold):
                 result.append(Document(page_content=chunk_text, metadata=dict(doc.metadata)))
         return result
 
@@ -156,6 +272,7 @@ def build_splitter(
         return SemanticChunker(
             embeddings if embeddings is not None else get_embeddings(),
             breakpoint_percentile=settings.semantic_chunker_breakpoint_percentile,
+            min_chunk_chars=settings.semantic_chunker_min_chunk_chars,
         )
 
     raise ValueError(f"Unknown chunking strategy: {strategy}")
