@@ -27,6 +27,13 @@ langchain==1.3.18
 langchain-community==0.4.2
 langchain-ollama==1.1.0
 chromadb==0.4.22
+# chromadb 0.4.22 asks for posthog>=2.4.0 with no ceiling, so pip took 7.x,
+# where capture()'s arguments became keyword-only. chromadb calls it
+# positionally, so every client start, collection create and query logged a
+# TypeError at ERROR level. 5.4.0 is the last release with the positional
+# signature. Telemetry is switched off in code as well (vector_store.py); this
+# pin is what stops the failed attempts from being noisy.
+posthog==5.4.0
 sentence-transformers==3.3.1
 
 # Document Processing
