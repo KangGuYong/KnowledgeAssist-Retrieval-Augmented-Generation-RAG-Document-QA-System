@@ -23,8 +23,9 @@ settings = get_settings()
 # 요청마다 새로 만들 이유가 없다.
 _LONG_CONTEXT_REORDER = LongContextReorder()
 
-# 컨텍스트는 청크의 page_content만 빈 줄로 이어붙인 것이다. 문서명·페이지 같은
-# 메타데이터는 들어가지 않는다. StuffDocumentsChain이 쓰던 기본값과 같다.
+# 컨텍스트는 청크마다 출처 헤더를 한 줄 붙이고 빈 줄로 이어붙인 것이다.
+# 헤더 형식은 QA_PROMPT 규칙 2번이 요구하는 인용 형식과 일부러 같게 두었다.
+# 그래야 LLM이 지어내지 않고 눈앞의 문자열을 그대로 옮길 수 있다.
 _DOCUMENT_SEPARATOR = "\n\n"
 
 # ConversationalRetrievalChain._get_chat_history가 쓰던 역할 접두다.
@@ -97,9 +98,21 @@ def _format_chat_history(messages: List[BaseMessage]) -> str:
     return buffer
 
 
+def _format_document(doc: Document) -> str:
+    """청크 하나를 출처 헤더 + 본문으로 만든다.
+
+    페이지는 PDF에만 있으므로(TXT/DOCX는 None) 있을 때만 붙인다. 문서명이
+    없는 경우의 "Unknown"은 _format_sources가 쓰는 값과 맞춘 것이다.
+    """
+    filename = doc.metadata.get("filename", "Unknown")
+    page = doc.metadata.get("page")
+    header = f"[출처: {filename}, p.{page}]" if page is not None else f"[출처: {filename}]"
+    return f"{header}\n{doc.page_content}"
+
+
 def _format_context(docs: List[Document]) -> str:
     """검색된 청크를 컨텍스트 문자열로 조립한다."""
-    return _DOCUMENT_SEPARATOR.join(doc.page_content for doc in docs)
+    return _DOCUMENT_SEPARATOR.join(_format_document(doc) for doc in docs)
 
 
 def _ocr_notice_for(context: str) -> str:
@@ -166,6 +179,9 @@ class RAGService:
             base_url=settings.ollama_base_url,
             model=settings.llm_model,
             temperature=settings.llm_temperature,
+            # Ollama 쪽 이름은 num_predict다. 연결하지 않던 동안 답변 길이
+            # 상한이 사실상 없었다.
+            num_predict=settings.max_tokens,
         )
 
     def _llm_with_retry(self):

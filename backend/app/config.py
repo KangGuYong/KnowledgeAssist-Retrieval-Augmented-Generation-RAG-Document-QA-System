@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://192.168.0.169:11434"
     llm_model: str = "gemma4:26b-a4b-it-q4_K_M"
     llm_temperature: float = 0.0
-    max_tokens: int = 2000
+    max_tokens: int = 2000  # ChatOllama의 num_predict로 전달되는 답변 길이 상한
     # 원격 Ollama가 잠깐 끊기거나 응답이 늦을 때만 다시 시도한다. 모델 없음·잘못된
     # 요청 같은 영구 실패는 몇 번을 걸어도 같으므로 재시도 대상이 아니다.
     # 1로 두면 재시도하지 않는다.

@@ -20,6 +20,8 @@ def test_rag_service_builds_an_ollama_chat_model():
 
     assert llm.model == "gemma4:26b-a4b-it-q4_K_M"
     assert llm.base_url == "http://192.168.0.169:11434"
+    # max_tokens가 실제로 전달되는지. 연결되지 않은 채 설정만 있던 적이 있다.
+    assert llm.num_predict == Settings().max_tokens
 
 
 def test_qa_prompt_warns_about_ocr_marker():

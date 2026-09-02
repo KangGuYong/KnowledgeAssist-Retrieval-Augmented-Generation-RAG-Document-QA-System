@@ -124,12 +124,11 @@ def test_the_rewritten_question_reaches_both_search_and_the_answer_prompt(monkey
     assert "그 예산은?" not in answer_prompt
 
 
-def test_context_is_page_content_only_joined_by_a_blank_line(monkeypatch):
-    """컨텍스트에 메타데이터가 새어 들어가지 않아야 한다.
+def test_each_chunk_carries_a_source_header(monkeypatch):
+    """QA_PROMPT 규칙 2번이 요구하는 인용을 실제로 할 수 있어야 한다.
 
-    문서명이 컨텍스트에 없다는 사실은 QA_PROMPT의 '[출처: 문서명]' 규칙이 지금
-    지킬 수 없는 규칙이라는 뜻이기도 하다(설계 문서 §1.2 발견 1). 이 테스트는
-    그 상태를 고정해 두므로, 규칙을 고칠 때 함께 갱신해야 한다.
+    문서명이 컨텍스트에 없던 동안 규칙 2번은 지어내야만 지킬 수 있는 규칙이었다.
+    헤더 형식을 규칙이 요구하는 형식과 같게 두었으므로 LLM은 그대로 옮기면 된다.
     """
     llm = RecordingLLM()
     results = [
@@ -141,9 +140,23 @@ def test_context_is_page_content_only_joined_by_a_blank_line(monkeypatch):
     asyncio.run(service.ask_question("질문"))
 
     answer_prompt = llm.prompts("answer")[0]
-    assert "첫 청크\n\n둘째 청크" in answer_prompt
-    assert "a.pdf" not in answer_prompt
-    assert "b.pdf" not in answer_prompt
+    assert "[출처: a.pdf, p.3]\n첫 청크" in answer_prompt
+    assert "[출처: b.pdf, p.7]\n둘째 청크" in answer_prompt
+    # 청크 사이는 여전히 빈 줄로 이어붙인다.
+    assert "첫 청크\n\n[출처: b.pdf" in answer_prompt
+
+
+def test_a_chunk_without_a_page_gets_a_header_without_one(monkeypatch):
+    """페이지는 PDF에만 있다. TXT/DOCX에서 'p.None'이 나오면 안 된다."""
+    llm = RecordingLLM()
+    results = [(Document(page_content="본문", metadata={"filename": "메모.txt"}), 0.9)]
+    service = build_service(monkeypatch, llm, results)
+
+    asyncio.run(service.ask_question("질문"))
+
+    answer_prompt = llm.prompts("answer")[0]
+    assert "[출처: 메모.txt]\n본문" in answer_prompt
+    assert "p.None" not in answer_prompt
 
 
 def test_history_accumulates_in_order_and_clears(monkeypatch):
