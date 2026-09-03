@@ -58,6 +58,19 @@
   color: #a0aec0;
 }
 
+/* 토큰 사용량. 타임스탬프와 같은 계층의 보조 정보이므로 같은 톤으로 두되,
+   숫자가 시각에 붙어 보이지 않도록 가운뎃점으로 끊는다. */
+.message-tokens {
+  font-size: 0.875rem;
+  color: #a0aec0;
+  cursor: help;
+}
+
+.message-tokens::before {
+  content: "·";
+  margin-right: 0.75rem;
+}
+
 .message-text {
   color: #2d3748;
   line-height: 1.6;

@@ -16,12 +16,19 @@ export interface SourceDocument {
   image_urls: string[];
 }
 
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
 export interface ChatResponse {
   answer: string;
   sources: SourceDocument[];
   conversation_id: string;
   message_id: string;
   timestamp: string;
+  token_usage: TokenUsage;
 }
 
 export interface UploadResponse {

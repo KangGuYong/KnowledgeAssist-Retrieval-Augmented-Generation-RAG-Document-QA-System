@@ -40,16 +40,20 @@ class RecordingLLM:
     구분한다. condense 프롬프트는 반드시 "Standalone question:"으로 끝난다.
     """
 
-    def __init__(self, condensed="재작성된 질문", answer="답변"):
+    def __init__(self, condensed="재작성된 질문", answer="답변", usage=None):
         self.condensed = condensed
         self.answer = answer
+        self.usage = usage
         self.calls = []
 
     def __call__(self, prompt_value):
         text = prompt_value.to_string()
         kind = "condense" if text.rstrip().endswith("Standalone question:") else "answer"
         self.calls.append((kind, text))
-        return AIMessage(content=self.condensed if kind == "condense" else self.answer)
+        content = self.condensed if kind == "condense" else self.answer
+        if self.usage is None:
+            return AIMessage(content=content)
+        return AIMessage(content=content, usage_metadata=self.usage)
 
     def prompts(self, kind):
         return [text for recorded_kind, text in self.calls if recorded_kind == kind]
@@ -281,3 +285,44 @@ def test_retry_can_be_turned_off(monkeypatch):
         asyncio.run(service.ask_question("질문"))
 
     assert llm.attempts == 1
+
+
+def _usage(inp, out):
+    return {"input_tokens": inp, "output_tokens": out, "total_tokens": inp + out}
+
+
+def test_token_usage_covers_only_the_answer_call_on_a_first_question(monkeypatch):
+    """첫 질문은 LLM을 한 번만 부르므로 그 한 번의 사용량만 나와야 한다."""
+    llm = RecordingLLM(usage=_usage(100, 20))
+    service = build_service(monkeypatch, llm, _one_chunk())
+
+    result = asyncio.run(service.ask_question("질문"))
+
+    assert llm.prompts("condense") == []
+    assert result["token_usage"] == _usage(100, 20)
+
+
+def test_token_usage_sums_both_llm_calls_on_a_follow_up(monkeypatch):
+    """후속 질문은 재작성 + 답변 두 번을 부르므로 합계여야 한다.
+
+    답변 호출분만 세면 재작성 비용이 조용히 빠진다.
+    """
+    llm = RecordingLLM(usage=_usage(100, 20))
+    service = build_service(monkeypatch, llm, _one_chunk())
+
+    asyncio.run(service.ask_question("첫 질문", conversation_id="c1"))
+    result = asyncio.run(service.ask_question("후속 질문", conversation_id="c1"))
+
+    assert len(llm.prompts("condense")) == 1
+    assert result["token_usage"] == _usage(200, 40)
+
+
+def test_missing_usage_metadata_reports_zeros(monkeypatch):
+    """사용량을 주지 않는 공급자에서도 답변은 정상이어야 한다."""
+    llm = RecordingLLM(usage=None)
+    service = build_service(monkeypatch, llm, _one_chunk())
+
+    result = asyncio.run(service.ask_question("질문"))
+
+    assert result["answer"] == "답변"
+    assert result["token_usage"] == _usage(0, 0)

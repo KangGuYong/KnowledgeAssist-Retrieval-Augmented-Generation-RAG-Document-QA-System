@@ -71,6 +71,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ documentIds }) => {
         content: response.answer,
         sources: response.sources,
         timestamp: new Date(response.timestamp),
+        tokenUsage: response.token_usage,
       };
 
       // Replace loading message with actual response

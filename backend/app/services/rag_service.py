@@ -31,6 +31,13 @@ _DOCUMENT_SEPARATOR = "\n\n"
 # ConversationalRetrievalChain._get_chat_history가 쓰던 역할 접두다.
 _ROLE_PREFIXES = {"human": "Human: ", "ai": "Assistant: "}
 
+_USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens")
+_NO_USAGE = {key: 0 for key in _USAGE_KEYS}
+
+# 체인을 AIMessage까지만 세우고 본문 추출은 여기서 한다. 그래야 같은 응답에서
+# usage_metadata도 꺼낼 수 있다 - 파서가 체인 끝에 붙으면 메시지가 버려진다.
+_TEXT_PARSER = StrOutputParser()
+
 # ollama 클라이언트는 httpx.ConnectError를 내장 ConnectionError로 바꿔 던지고,
 # 타임아웃은 httpx 예외 그대로 올려보낸다. 둘 다 다시 걸면 성공할 수 있는 실패다.
 # ollama.ResponseError는 404(모델 없음)와 500이 섞여 있어 재시도 대상에서 뺀다.
@@ -113,6 +120,21 @@ def _format_document(doc: Document) -> str:
 def _format_context(docs: List[Document]) -> str:
     """검색된 청크를 컨텍스트 문자열로 조립한다."""
     return _DOCUMENT_SEPARATOR.join(_format_document(doc) for doc in docs)
+
+
+def _usage_of(message: BaseMessage) -> Dict[str, int]:
+    """AIMessage에서 토큰 사용량을 꺼낸다.
+
+    usage_metadata는 공급자가 채워주는 값이라 없을 수 있다. 그때는 0으로
+    둔다 - 사용량을 못 셌다는 이유로 답변이 실패하면 안 된다.
+    """
+    usage = getattr(message, "usage_metadata", None) or {}
+    return {key: usage.get(key, 0) or 0 for key in _USAGE_KEYS}
+
+
+def _add_usage(left: Dict[str, int], right: Dict[str, int]) -> Dict[str, int]:
+    """한 번의 질문이 LLM을 두 번 부르므로(재작성 + 답변) 합산한다."""
+    return {key: left[key] + right[key] for key in _USAGE_KEYS}
 
 
 def _ocr_notice_for(context: str) -> str:
@@ -198,7 +220,7 @@ class RAGService:
 
     async def _condense_question(
         self, question: str, history: List[BaseMessage]
-    ) -> str:
+    ) -> tuple[str, Dict[str, int]]:
         """후속 질문을 대화 맥락 없이도 검색 가능한 독립 질문으로 바꾼다.
 
         첫 질문이면 이력이 비어 있으므로 LLM을 부르지 않고 원 질문을 그대로
@@ -207,12 +229,14 @@ class RAGService:
         """
         chat_history = _format_chat_history(history)
         if not chat_history:
-            return question
+            # LLM을 부르지 않았으므로 이 턴의 사용량에 더할 것도 없다.
+            return question, _NO_USAGE
 
-        chain = CONDENSE_PROMPT | self._llm_with_retry() | StrOutputParser()
-        return await chain.ainvoke(
+        chain = CONDENSE_PROMPT | self._llm_with_retry()
+        message = await chain.ainvoke(
             {"chat_history": chat_history, "question": question}
         )
+        return _TEXT_PARSER.invoke(message), _usage_of(message)
 
     async def ask_question(
         self,
@@ -247,7 +271,9 @@ class RAGService:
         )
 
         try:
-            standalone_question = await self._condense_question(question, history)
+            standalone_question, usage = await self._condense_question(
+                question, history
+            )
             if standalone_question != question:
                 logger.debug("Condensed question: %s", standalone_question)
 
@@ -257,14 +283,16 @@ class RAGService:
             docs = await retriever.ainvoke(standalone_question)
 
             context = _format_context(docs)
-            answer_chain = QA_PROMPT | self._llm_with_retry() | StrOutputParser()
-            answer = await answer_chain.ainvoke(
+            answer_chain = QA_PROMPT | self._llm_with_retry()
+            message = await answer_chain.ainvoke(
                 {
                     "context": context,
                     "ocr_notice": _ocr_notice_for(context),
                     "question": standalone_question,
                 }
             )
+            answer = _TEXT_PARSER.invoke(message)
+            usage = _add_usage(usage, _usage_of(message))
 
         except Exception as e:
             logger.error(f"Error in RAG pipeline: {e}")
@@ -278,7 +306,8 @@ class RAGService:
             "answer": answer,
             "sources": self._format_sources(docs),
             "conversation_id": conversation_id,
-            "message_id": f"msg_{uuid.uuid4().hex[:12]}"
+            "message_id": f"msg_{uuid.uuid4().hex[:12]}",
+            "token_usage": usage,
         }
 
     def _format_sources(self, source_docs: list) -> list[SourceDocument]:

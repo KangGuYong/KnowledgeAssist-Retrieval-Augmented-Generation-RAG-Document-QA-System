@@ -12,6 +12,9 @@ interface MessageProps {
 export const Message: React.FC<MessageProps> = ({ message }) => {
   const [showSources, setShowSources] = useState(false);
   const isUser = message.role === 'user';
+  // 사용량을 못 받은 응답(공급자가 안 주거나 예전 메시지)에서는 숨긴다.
+  const usage = message.tokenUsage;
+  const showUsage = !isUser && !!usage && usage.total_tokens > 0;
 
   return (
     <div className={`message ${message.role}`}>
@@ -28,6 +31,14 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
               minute: '2-digit',
             })}
           </span>
+          {showUsage && (
+            <span
+              className="message-tokens"
+              title={`입력 ${usage!.input_tokens.toLocaleString()} · 출력 ${usage!.output_tokens.toLocaleString()} 토큰 (질문 재작성 + 답변 합계)`}
+            >
+              {usage!.total_tokens.toLocaleString()} tokens
+            </span>
+          )}
         </div>
 
         <div className="message-text">

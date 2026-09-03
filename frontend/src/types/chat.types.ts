@@ -1,4 +1,4 @@
-import { SourceDocument } from './api.types';
+import { SourceDocument, TokenUsage } from './api.types';
 
 export interface Message {
   id: string;
@@ -6,6 +6,7 @@ export interface Message {
   content: string;
   sources?: SourceDocument[];
   timestamp: Date;
+  tokenUsage?: TokenUsage;
   isLoading?: boolean;
 }
 
