@@ -272,3 +272,16 @@ def test_rerank_scores_survive_the_reordering():
 
     assert all("rerank_score" in d.metadata for d in docs)
     assert all("similarity_score" in d.metadata for d in docs)
+
+
+def test_rerank_without_candidate_k_falls_back_to_k():
+    """candidate_k를 빠뜨린 호출이 Chroma에 k=0을 넘겨 질문을 죽이면 안 된다."""
+    store = FakeVectorStore(_docs_with_scores([("a", 0.9), ("b", 0.8)]))
+    retriever = ScoringRetriever(
+        vector_store=store, k=2, rerank=True,
+        reranker=FakeReranker(scores=[0.1, 0.2]), reorder=False,
+    )
+
+    retriever.invoke("질문")
+
+    assert store.calls[0]["k"] == 2

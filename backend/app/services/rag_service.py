@@ -173,7 +173,9 @@ class ScoringRetriever(BaseRetriever):
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
         # 리랭킹을 끄면 후보를 넓게 뽑지 않는다. 검색 비용까지 현재와 같아진다.
-        fetch_k = self.candidate_k if self.rerank else self.k
+        # candidate_k가 0이면(설정을 빠뜨린 호출) Chroma가 TypeError를 던지고,
+        # 이 호출은 _rerank의 try 바깥이라 질문 전체가 실패한다. k로 물러난다.
+        fetch_k = (self.candidate_k or self.k) if self.rerank else self.k
         results = self.vector_store.similarity_search_with_relevance_scores(
             query, k=fetch_k, filter=self.search_filter
         )
@@ -206,7 +208,9 @@ class ScoringRetriever(BaseRetriever):
                     f"reranker returned {len(scores)} scores for {len(docs)} documents"
                 )
         except Exception as exc:
-            logger.warning("Reranking failed, using vector order: %s", exc)
+            logger.warning(
+                "Reranking failed, using vector order: %s", exc, exc_info=True
+            )
             return docs[: self.k]
 
         for doc, score in zip(docs, scores):
