@@ -47,3 +47,6 @@ backend/app/storage/uploads/*
 !backend/app/storage/uploads/.gitkeep
 backend/app/storage/chroma_db/*
 !backend/app/storage/chroma_db/.gitkeep
+
+# 브레인스토밍 시각 도구가 만드는 목업 (세션마다 새로 생성)
+.superpowers/
