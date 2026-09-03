@@ -363,9 +363,17 @@ class RAGService:
         # 0.0이 아니라 -inf인 이유: 관련성 점수는 음수가 될 수 있다. Chroma
         # 컬렉션이 hnsw:space 없이 만들어져 LangChain이 유클리드 변환식
         # (1 - distance/sqrt(2))을 쓰기 때문이다.
+        # 리랭킹을 거친 응답은 리랭크 점수가 기준이다. 한 응답의 문서는 전부
+        # 리랭킹을 거쳤거나 전부 거치지 않았거나 둘 중 하나이므로(폴백도 요청
+        # 단위다) 두 점수 체계가 한 정렬에 섞이지 않는다.
+        score_key = (
+            "rerank_score"
+            if any("rerank_score" in doc.metadata for doc in source_docs)
+            else "similarity_score"
+        )
         ordered_docs = sorted(
             source_docs,
-            key=lambda doc: doc.metadata.get("similarity_score") or float("-inf"),
+            key=lambda doc: doc.metadata.get(score_key) or float("-inf"),
             reverse=True,
         )
 
@@ -388,6 +396,7 @@ class RAGService:
                 page=doc.metadata.get("page"),
                 chunk_index=doc.metadata.get("chunk_index", 0),
                 similarity_score=doc.metadata.get("similarity_score"),
+                rerank_score=doc.metadata.get("rerank_score"),
                 image_urls=image_urls,
             )
             formatted_sources.append(source)

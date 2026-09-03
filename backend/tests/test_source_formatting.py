@@ -139,3 +139,29 @@ def test_negative_scores_still_sort_above_a_document_with_no_score():
     sources = _format(docs)
 
     assert [s.content for s in sources] == ["음수 점수", "점수 없음"]
+
+
+def test_sources_are_sorted_by_rerank_score_when_present():
+    """리랭커가 선별했으면 출처 순서도 리랭크 점수를 따라야 한다.
+
+    벡터 점수로 정렬하면 화면의 순서와 선별 근거가 어긋난다. 두 점수를 일부러
+    반대로 세워 어느 기준이 쓰였는지 구분한다.
+    """
+    sources = _format([
+        Document(page_content="a", metadata={"similarity_score": 0.9, "rerank_score": 0.1}),
+        Document(page_content="b", metadata={"similarity_score": 0.5, "rerank_score": 0.99}),
+    ])
+
+    assert [s.content for s in sources] == ["b", "a"]
+    assert sources[0].rerank_score == 0.99
+
+
+def test_sources_fall_back_to_similarity_score_without_reranking():
+    """리랭커를 껐거나 폴백했으면 기존 기준 그대로다."""
+    sources = _format([
+        Document(page_content="a", metadata={"similarity_score": 0.5}),
+        Document(page_content="b", metadata={"similarity_score": 0.9}),
+    ])
+
+    assert [s.content for s in sources] == ["b", "a"]
+    assert sources[0].rerank_score is None
