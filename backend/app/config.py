@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     # 양 끝으로 보낸다(Lost in the Middle 완화). 끄면 관련성 내림차순 그대로.
     retrieval_reorder: bool = True
 
+    # 리랭킹 - 후보를 넓게 뽑아 크로스인코더로 재채점한 뒤 상위 retrieval_k개만 쓴다.
+    # 끄면 후보 수가 retrieval_k로 줄어 현재와 완전히 같은 동작이 된다.
+    rerank_enabled: bool = True
+    rerank_model: str = "dragonkue/bge-reranker-v2-m3-ko"
+    rerank_device: str = "cuda"  # "cpu", "cuda", "cuda:0", ...
+    rerank_candidate_k: int = 30  # 리랭커에 넘길 후보 수
+
     # Chunking strategy
     chunking_strategy: str = "default"  # "default" | "semantic"
     # Distances above this percentile of all consecutive-sentence distances

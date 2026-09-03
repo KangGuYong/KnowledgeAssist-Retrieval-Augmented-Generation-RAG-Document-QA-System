@@ -46,3 +46,14 @@ def test_qa_prompt_does_not_claim_the_context_is_relevance_ordered():
     from app.services.rag_service import QA_PROMPT
 
     assert "관련성 순" not in QA_PROMPT.template
+
+
+def test_reranking_defaults():
+    """리랭킹은 기본으로 켜져 있고, 후보는 최종보다 많아야 의미가 있다."""
+    settings = Settings(_env_file=None)
+
+    assert settings.rerank_enabled is True
+    assert settings.rerank_model == "dragonkue/bge-reranker-v2-m3-ko"
+    assert settings.rerank_device == "cuda"
+    assert settings.rerank_candidate_k == 30
+    assert settings.rerank_candidate_k > settings.retrieval_k
