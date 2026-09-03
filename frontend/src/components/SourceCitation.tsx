@@ -53,6 +53,9 @@ export const SourceCitation: React.FC<SourceCitationProps> = ({ source, index })
       {source.similarity_score != null && (
         <div className="source-score">
           Relevance: {(source.similarity_score * 100).toFixed(1)}%
+          {source.rerank_score != null && (
+            <> · Rerank: {(source.rerank_score * 100).toFixed(1)}%</>
+          )}
         </div>
       )}
 

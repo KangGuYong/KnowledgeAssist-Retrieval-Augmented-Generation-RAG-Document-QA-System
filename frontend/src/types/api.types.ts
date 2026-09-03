@@ -13,6 +13,7 @@ export interface SourceDocument {
   page?: number;
   chunk_index: number;
   similarity_score: number | null;
+  rerank_score: number | null;
   image_urls: string[];
 }
 
