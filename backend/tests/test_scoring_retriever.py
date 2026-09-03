@@ -147,6 +147,8 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
             retrieval_reorder=configured,
             ocr_block_prefix="[이미지 텍스트]",
             llm_max_attempts=1,
+            rerank_enabled=False,
+            rerank_candidate_k=30,
         ),
     )
 
@@ -160,6 +162,55 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
 
     assert captured["retriever"].reorder is configured
     assert captured["retriever"].k == 10
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_ask_question_injects_the_rerank_settings_into_the_retriever(
+    monkeypatch, configured
+):
+    """RERANK_ENABLED와 후보 수가 실제로 리트리버까지 전달되는지 확인한다.
+
+    한쪽 방향만 검사하면 rerank를 상수로 박아넣은 코드를 잡지 못한다.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from langchain_core.messages import AIMessage
+    from langchain_core.runnables import RunnableLambda
+
+    import app.services.rag_service as rag_module
+    from app.services.rag_service import RAGService
+
+    captured = {}
+    real_retriever_cls = rag_module.ScoringRetriever
+
+    def spy(**kwargs):
+        captured["retriever"] = real_retriever_cls(**kwargs)
+        return captured["retriever"]
+
+    monkeypatch.setattr(rag_module, "ScoringRetriever", spy)
+    monkeypatch.setattr(
+        rag_module, "settings",
+        SimpleNamespace(
+            retrieval_k=5,
+            retrieval_reorder=True,
+            ocr_block_prefix="[이미지 텍스트]",
+            llm_max_attempts=1,
+            rerank_enabled=configured,
+            rerank_candidate_k=30,
+        ),
+    )
+
+    service = RAGService.__new__(RAGService)
+    service.vector_store = FakeVectorStore([])
+    service.llm = RunnableLambda(lambda _: AIMessage(content="ok"))
+    service.conversation_histories = {}
+
+    asyncio.run(service.ask_question("질문"))
+
+    assert captured["retriever"].rerank is configured
+    assert captured["retriever"].candidate_k == 30
+    assert captured["retriever"].k == 5
 
 
 class FakeReranker:

@@ -307,6 +307,8 @@ class RAGService:
             k=settings.retrieval_k,
             search_filter=search_filter,
             reorder=settings.retrieval_reorder,
+            rerank=settings.rerank_enabled,
+            candidate_k=settings.rerank_candidate_k,
         )
 
         try:

@@ -68,6 +68,8 @@ def build_service(monkeypatch, llm, results=(), reorder=False, llm_max_attempts=
             retrieval_reorder=reorder,
             ocr_block_prefix="[이미지 텍스트]",
             llm_max_attempts=llm_max_attempts,
+            rerank_enabled=False,
+            rerank_candidate_k=30,
         ),
     )
     service = RAGService.__new__(RAGService)
