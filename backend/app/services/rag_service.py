@@ -6,6 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_ollama import ChatOllama
+from app.services.reranker import get_reranker
 from typing import Any, Dict, List, Optional
 import httpx
 import logging
@@ -163,12 +164,18 @@ class ScoringRetriever(BaseRetriever):
     k: int
     search_filter: Optional[dict] = None
     reorder: bool = True
+    rerank: bool = False
+    candidate_k: int = 0
+    # 기본값은 공유 리랭커(get_reranker). 테스트에서 주입할 수 있게 열어 둔다.
+    reranker: Any = None
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
+        # 리랭킹을 끄면 후보를 넓게 뽑지 않는다. 검색 비용까지 현재와 같아진다.
+        fetch_k = self.candidate_k if self.rerank else self.k
         results = self.vector_store.similarity_search_with_relevance_scores(
-            query, k=self.k, filter=self.search_filter
+            query, k=fetch_k, filter=self.search_filter
         )
         # 점수는 반드시 재배치 "전"에 심는다. 재배치하면 문서 순서가 바뀌면서
         # results의 (doc, score) 짝을 더는 위치로 복원할 수 없다.
@@ -176,10 +183,38 @@ class ScoringRetriever(BaseRetriever):
             doc.metadata["similarity_score"] = score
 
         docs = [doc for doc, _ in results]
+        if self.rerank:
+            docs = self._rerank(query, docs)
+
         if not self.reorder:
             return docs
         # transform_documents는 Sequence를 돌려주므로 List로 맞춘다.
         return list(_LONG_CONTEXT_REORDER.transform_documents(docs))
+
+    def _rerank(self, query: str, docs: List[Document]) -> List[Document]:
+        """크로스인코더로 재채점해 상위 k개만 남긴다.
+
+        리랭킹은 품질 개선이지 정확성 요건이 아니다. 모델 로드 실패든 추론
+        실패든, 실패하면 벡터 순서 상위 k개로 물러나고 질문은 성공시킨다.
+        """
+        try:
+            reranker = self.reranker or get_reranker()
+            scores = reranker.score(query, docs)
+            if len(scores) != len(docs):
+                # zip이 조용히 잘라내는 대신 여기서 잡는다.
+                raise ValueError(
+                    f"reranker returned {len(scores)} scores for {len(docs)} documents"
+                )
+        except Exception as exc:
+            logger.warning("Reranking failed, using vector order: %s", exc)
+            return docs[: self.k]
+
+        for doc, score in zip(docs, scores):
+            doc.metadata["rerank_score"] = score
+        ranked = sorted(
+            docs, key=lambda doc: doc.metadata["rerank_score"], reverse=True
+        )
+        return ranked[: self.k]
 
 
 class RAGService:

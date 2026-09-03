@@ -160,3 +160,115 @@ def test_ask_question_injects_the_reorder_setting_into_the_retriever(monkeypatch
 
     assert captured["retriever"].reorder is configured
     assert captured["retriever"].k == 10
+
+
+class FakeReranker:
+    """호출을 기록하고 정해진 점수를 돌려준다. 예외를 던지게도 만들 수 있다."""
+
+    def __init__(self, scores=None, error=None):
+        self.scores = scores
+        self.error = error
+        self.calls = []
+
+    def score(self, query, docs):
+        self.calls.append((query, [d.page_content for d in docs]))
+        if self.error:
+            raise self.error
+        return self.scores
+
+
+def _docs_with_scores(pairs):
+    return [
+        (Document(page_content=text, metadata={}), score) for text, score in pairs
+    ]
+
+
+def test_reranking_picks_the_top_k_by_rerank_score_not_vector_score():
+    """벡터 순서와 리랭크 순서를 일부러 어긋나게 세운다.
+
+    두 기준이 같은 답을 내면 무엇을 검증했는지 알 수 없다.
+    """
+    store = FakeVectorStore(_docs_with_scores([("a", 0.9), ("b", 0.8), ("c", 0.7)]))
+    reranker = FakeReranker(scores=[0.1, 0.99, 0.5])
+    retriever = ScoringRetriever(
+        vector_store=store, k=2, rerank=True, candidate_k=3,
+        reranker=reranker, reorder=False,
+    )
+
+    docs = retriever.invoke("질문")
+
+    assert [d.page_content for d in docs] == ["b", "c"]
+    assert docs[0].metadata["rerank_score"] == 0.99
+    # 벡터 점수도 그대로 남는다.
+    assert docs[0].metadata["similarity_score"] == 0.8
+
+
+def test_candidate_k_is_what_reaches_the_vector_store_when_reranking():
+    store = FakeVectorStore(_docs_with_scores([("a", 0.9), ("b", 0.8), ("c", 0.7)]))
+    retriever = ScoringRetriever(
+        vector_store=store, k=2, rerank=True, candidate_k=3,
+        reranker=FakeReranker(scores=[0.1, 0.2, 0.3]), reorder=False,
+    )
+
+    retriever.invoke("질문")
+
+    assert store.calls[0]["k"] == 3
+
+
+def test_k_is_what_reaches_the_vector_store_when_not_reranking():
+    """끄면 후보를 넓게 뽑지 않는다. 검색 비용까지 현재와 같아야 한다."""
+    store = FakeVectorStore(_docs_with_scores([("a", 0.9), ("b", 0.8)]))
+    reranker = FakeReranker(scores=[0.1, 0.2])
+    retriever = ScoringRetriever(
+        vector_store=store, k=2, rerank=False, candidate_k=30,
+        reranker=reranker, reorder=False,
+    )
+
+    retriever.invoke("질문")
+
+    assert store.calls[0]["k"] == 2
+    assert reranker.calls == []
+
+
+def test_a_failing_reranker_falls_back_to_vector_order():
+    """리랭킹은 품질 개선이지 정확성 요건이 아니다. 질문이 실패하면 안 된다."""
+    store = FakeVectorStore(_docs_with_scores([("a", 0.9), ("b", 0.8), ("c", 0.7)]))
+    retriever = ScoringRetriever(
+        vector_store=store, k=2, rerank=True, candidate_k=3,
+        reranker=FakeReranker(error=RuntimeError("모델 로드 실패")), reorder=False,
+    )
+
+    docs = retriever.invoke("질문")
+
+    assert [d.page_content for d in docs] == ["a", "b"]
+    assert "rerank_score" not in docs[0].metadata
+
+
+def test_a_score_count_mismatch_falls_back_too():
+    """점수 개수가 문서 수와 다르면 zip이 조용히 잘라내므로 폴백한다."""
+    store = FakeVectorStore(_docs_with_scores([("a", 0.9), ("b", 0.8), ("c", 0.7)]))
+    retriever = ScoringRetriever(
+        vector_store=store, k=2, rerank=True, candidate_k=3,
+        reranker=FakeReranker(scores=[0.1]), reorder=False,
+    )
+
+    docs = retriever.invoke("질문")
+
+    assert [d.page_content for d in docs] == ["a", "b"]
+    assert "rerank_score" not in docs[0].metadata
+
+
+def test_rerank_scores_survive_the_reordering():
+    """재배치는 순서만 바꾼다. 두 점수 모두 남아야 _format_sources가 되돌린다."""
+    store = FakeVectorStore(
+        _docs_with_scores([("a", 0.9), ("b", 0.8), ("c", 0.7), ("d", 0.6)])
+    )
+    retriever = ScoringRetriever(
+        vector_store=store, k=4, rerank=True, candidate_k=4,
+        reranker=FakeReranker(scores=[0.1, 0.4, 0.3, 0.2]), reorder=True,
+    )
+
+    docs = retriever.invoke("질문")
+
+    assert all("rerank_score" in d.metadata for d in docs)
+    assert all("similarity_score" in d.metadata for d in docs)
