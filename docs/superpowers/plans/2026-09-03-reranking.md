@@ -457,7 +457,9 @@ from app.services.reranker import get_reranker
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
         # 리랭킹을 끄면 후보를 넓게 뽑지 않는다. 검색 비용까지 현재와 같아진다.
-        fetch_k = self.candidate_k if self.rerank else self.k
+        # candidate_k가 0이면(설정을 빠뜨린 호출) Chroma가 TypeError를 던지고,
+        # 이 호출은 _rerank의 try 바깥이라 질문 전체가 실패한다. k로 물러난다.
+        fetch_k = (self.candidate_k or self.k) if self.rerank else self.k
         results = self.vector_store.similarity_search_with_relevance_scores(
             query, k=fetch_k, filter=self.search_filter
         )
@@ -490,7 +492,9 @@ from app.services.reranker import get_reranker
                     f"reranker returned {len(scores)} scores for {len(docs)} documents"
                 )
         except Exception as exc:
-            logger.warning("Reranking failed, using vector order: %s", exc)
+            logger.warning(
+                "Reranking failed, using vector order: %s", exc, exc_info=True
+            )
             return docs[: self.k]
 
         for doc, score in zip(docs, scores):
@@ -507,7 +511,23 @@ from app.services.reranker import get_reranker
 ./app/venv/bin/python -m pytest tests/test_scoring_retriever.py -v
 ```
 
-기대: 기존 10개 + 신규 6개 = 16 passed
+또한 `candidate_k`를 빠뜨린 호출이 Chroma에 `k=0`을 넘기지 않는지 고정한다:
+
+```python
+def test_rerank_without_candidate_k_falls_back_to_k():
+    """candidate_k를 빠뜨린 호출이 Chroma에 k=0을 넘겨 질문을 죽이면 안 된다."""
+    store = FakeVectorStore(_docs_with_scores([("a", 0.9), ("b", 0.8)]))
+    retriever = ScoringRetriever(
+        vector_store=store, k=2, rerank=True,
+        reranker=FakeReranker(scores=[0.1, 0.2]), reorder=False,
+    )
+
+    retriever.invoke("질문")
+
+    assert store.calls[0]["k"] == 2
+```
+
+기대: 기존 10개 + 신규 7개 = 17 passed
 
 - [ ] **Step 5: 커밋한다**
 
@@ -636,7 +656,7 @@ def test_ask_question_injects_the_rerank_settings_into_the_retriever(
 ./app/venv/bin/python -m pytest -q
 ```
 
-기대: **197 passed** (기준선 185 + Task1 1개 + Task2 3개 + Task3 6개 + Task4 2개)
+기대: **198 passed** (기준선 185 + Task1 1개 + Task2 3개 + Task3 7개 + Task4 2개)
 
 이 시점에서 설계 문서 §7.2가 요구하는 것이 확인된다: 새 테스트의 settings 대역이
 전부 `rerank_enabled=False`이므로, **기존 테스트는 한 줄도 수정하지 않고 통과해야
