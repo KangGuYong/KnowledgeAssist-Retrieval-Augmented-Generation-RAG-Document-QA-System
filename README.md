@@ -196,6 +196,10 @@ Backend settings live in `backend/.env` (see `.env.example`); defaults are in
 | `EMBEDDING_DEVICE` | `cuda` | `cpu`, `cuda`, `cuda:0`, … |
 | `RETRIEVAL_K` | `10` | Chunks retrieved per question |
 | `RETRIEVAL_REORDER` | `true` | Put the most relevant chunks at both ends of the context |
+| `RERANK_ENABLED` | `true` | Rescore a wider candidate pool with a cross-encoder, keep `RETRIEVAL_K` |
+| `RERANK_MODEL` | `dragonkue/bge-reranker-v2-m3-ko` | Korean-tuned multilingual reranker (2.27GB) |
+| `RERANK_DEVICE` | `cuda` | `cpu`, `cuda`, `cuda:0`, … |
+| `RERANK_CANDIDATE_K` | `30` | Candidates fetched before reranking |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `200` | Also the page-merge target size |
 | `CHUNKING_STRATEGY` | `default` | `default` or `semantic` |
 | `MAX_DOCUMENTS` | `10` | Total documents allowed at once |

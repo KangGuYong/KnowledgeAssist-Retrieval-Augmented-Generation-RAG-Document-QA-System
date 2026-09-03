@@ -116,6 +116,10 @@ MinerU 호출이 실패하면 예외를 삼키고 `PyPDFLoader`로 폴백한다.
 대명사 의존 후속 질문을 검색 가능한 독립 질문으로 바꾸기 위한 것이며, **대화의 첫
 질문에서는 이력이 비어 있으므로 이 단계를 건너뛴다.**
 
+`rerank_enabled`가 켜져 있으면 벡터 검색이 `rerank_candidate_k`개를 뽑고,
+크로스인코더가 (질문, 청크) 쌍을 재채점해 상위 `retrieval_k`개만 남긴다.
+리랭커가 실패하면 벡터 순서로 물러나며 질문은 실패하지 않는다.
+
 검색과 답변 모두 재작성된 질문을 쓴다. 컨텍스트는 청크마다 `[출처: 문서명, p.N]`
 헤더를 한 줄 붙여 빈 줄로 이어붙인다. 헤더 형식은 `QA_PROMPT`가 요구하는 인용
 형식과 같게 두어, LLM이 지어내지 않고 그대로 옮겨 적을 수 있게 했다.
@@ -272,6 +276,8 @@ Swagger UI: `http://localhost:8000/docs`
 | `embedding_model`                        | `nlpai-lab/KURE-v1`          | 임베딩 모델                  |
 | `embedding_device`                       | `cuda`                       | `cpu`로 바꾸면 크게 느려짐   |
 | `retrieval_k`                            | `10`                         | 검색할 청크 수               |
+| `rerank_enabled`                         | `true`                       | 크로스인코더 재채점 사용     |
+| `rerank_candidate_k`                     | `30`                         | 재채점 전에 뽑는 후보 수     |
 | `chunk_size` / `chunk_overlap`           | `1000` / `200`               | 페이지 병합 목표 크기도 겸함 |
 | `chunking_strategy`                      | `default`                    | `default` \| `semantic`      |
 | `semantic_chunker_breakpoint_percentile` | `95.0`                       | 경계 임계 백분위             |
