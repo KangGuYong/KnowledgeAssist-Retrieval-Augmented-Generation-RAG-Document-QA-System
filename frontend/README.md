@@ -17,8 +17,9 @@ cp .env.example .env
 ```
 
 `VITE_API_BASE_URL` is empty by default, so requests go through Vite's dev
-proxy (`/api` -> `http://localhost:8000`, no CORS involved). Set it only if
-the backend runs on a different origin.
+proxy (`/api` -> `API_PROXY_TARGET`, default `http://127.0.0.1:8000`, no CORS
+involved). Change `API_PROXY_TARGET` when the backend listens on another port;
+set `VITE_API_BASE_URL` only if the browser must call the backend directly.
 
 3. Start development server:
 
