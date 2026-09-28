@@ -31,9 +31,9 @@ class CrossEncoderReranker:
     def __init__(
         self, model_name: Optional[str] = None, device: Optional[str] = None
     ):
-        self.model_name = model_name or settings.rerank_model
-        self.device = device or settings.rerank_device
-        self._model = None
+        self.model_name = model_name or settings.rerank_model #리랭커 모델명
+        self.device = device or settings.rerank_device #리랭커 CPU or GPU 사용 선택
+        self._model = None #동작 모댈
         self._lock = threading.Lock()
 
     def _build_model(self):
@@ -42,7 +42,7 @@ class CrossEncoderReranker:
         logger.info(
             "Loading reranker: %s (device=%s)", self.model_name, self.device
         )
-        return CrossEncoder(self.model_name, device=self.device)
+        return CrossEncoder(self.model_name, device=self.device) #CrossEncoder 함수를 사용하면 허킹페이스에서 모델을 자동으로 내려받는다.
 
     @property
     def model(self):
@@ -53,6 +53,7 @@ class CrossEncoderReranker:
                     self._model = self._build_model()
         return self._model
 
+    #호출시 모델 초기화: 1회 재실행시 캐시값을 사용
     def score(self, query: str, docs: List[Document]) -> List[float]:
         """docs와 같은 길이의 점수 목록을 돌려준다."""
         if not docs:
