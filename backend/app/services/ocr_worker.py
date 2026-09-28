@@ -22,7 +22,7 @@ def install_modelscope_stub() -> None:
     existing = sys.modules.get("modelscope")
     if getattr(existing, "__ocr_worker_stub__", False):
         return
-
+    
     stub = types.ModuleType("modelscope")
     stub.__ocr_worker_stub__ = True
 

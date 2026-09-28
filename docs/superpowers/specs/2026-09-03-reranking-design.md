@@ -151,12 +151,13 @@ chromadb가 동기이므로 `_aget_relevant_documents`를 추가해도 스레드
 
 `config.py`에 추가한다.
 
-| 키 | 기본값 | 의미 |
-|---|---|---|
-| `rerank_enabled` | `True` | 끄면 지금과 동일하게 동작 |
-| `rerank_model` | `dragonkue/bge-reranker-v2-m3-ko` | 한국어 추가 학습된 다국어 리랭커 |
-| `rerank_device` | `cuda` | `cpu`, `cuda`, `cuda:0` … |
-| `rerank_candidate_k` | `30` | 리랭커에 넘길 후보 수 |
+
+| 키                   | 기본값                            | 의미                             |
+| ---------------------- | ----------------------------------- | ---------------------------------- |
+| `rerank_enabled`     | `True`                            | 끄면 지금과 동일하게 동작        |
+| `rerank_model`       | `dragonkue/bge-reranker-v2-m3-ko` | 한국어 추가 학습된 다국어 리랭커 |
+| `rerank_device`      | `cuda`                            | `cpu`, `cuda`, `cuda:0` …       |
+| `rerank_candidate_k` | `30`                              | 리랭커에 넘길 후보 수            |
 
 `retrieval_k`는 **의미를 바꾸지 않는다.** 지금도 앞으로도 LLM에 넣는 최종
 개수이며, `.env`의 `RETRIEVAL_K=5`가 다른 뜻이 되는 일은 없다. 리랭커를 끄면
@@ -186,14 +187,15 @@ chromadb가 동기이므로 `_aget_relevant_documents`를 추가해도 스레드
 
 리랭커는 고정 점수를 돌려주는 대역으로 세운다. 실제 모델은 A/B에서만 쓴다.
 
-| 테스트 | 지키는 것 |
-|---|---|
+
+| 테스트              | 지키는 것                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
 | 리랭크 점수 순 선택 | 후보 30개에서 상위 5개가 **리랭크 점수** 순으로 뽑히는지. 벡터 순서와 다른 정답을 세워 두 기준을 구분한다 |
-| 끄면 동일 | `rerank_enabled=False`에서 후보 수가 `retrieval_k`가 되고 리랭커를 부르지 않는지 |
-| 예외 폴백 | 리랭커가 예외를 던져도 답변이 나오고, 벡터 순서 상위 N개가 오는지 |
-| 두 점수 보존 | 재배치 후에도 `similarity_score`와 `rerank_score`가 모두 남는지 |
-| 출처 정렬 | `_format_sources`가 리랭크 점수 순인지, 없을 때 벡터 점수로 되돌아가는지 |
-| 후보 수 전달 | `rerank_candidate_k`가 실제로 Chroma의 `k`로 가는지 (켬/끔 양방향) |
+| 끄면 동일           | `rerank_enabled=False`에서 후보 수가 `retrieval_k`가 되고 리랭커를 부르지 않는지                         |
+| 예외 폴백           | 리랭커가 예외를 던져도 답변이 나오고, 벡터 순서 상위 N개가 오는지                                        |
+| 두 점수 보존        | 재배치 후에도 `similarity_score`와 `rerank_score`가 모두 남는지                                           |
+| 출처 정렬           | `_format_sources`가 리랭크 점수 순인지, 없을 때 벡터 점수로 되돌아가는지                                 |
+| 후보 수 전달        | `rerank_candidate_k`가 실제로 Chroma의 `k`로 가는지 (켬/끔 양방향)                                       |
 
 ### 7.2 기존 테스트가 계약이다
 
