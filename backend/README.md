@@ -8,7 +8,7 @@ FastAPI-based backend for the Knowledge Assist RAG application.
 
 ```bash
 python -m venv venv
-source /app/venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
 2. Install dependencies:

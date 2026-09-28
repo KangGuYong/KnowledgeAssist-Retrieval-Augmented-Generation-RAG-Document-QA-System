@@ -6,6 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_ollama import ChatOllama
+from app.services.reranker import get_reranker
 from typing import Any, Dict, List, Optional
 import httpx
 import logging
@@ -163,12 +164,20 @@ class ScoringRetriever(BaseRetriever):
     k: int
     search_filter: Optional[dict] = None
     reorder: bool = True
+    rerank: bool = False
+    candidate_k: int = 0
+    # 기본값은 공유 리랭커(get_reranker). 테스트에서 주입할 수 있게 열어 둔다.
+    reranker: Any = None
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
+        # 리랭킹을 끄면 후보를 넓게 뽑지 않는다. 검색 비용까지 현재와 같아진다.
+        # candidate_k가 0이면(설정을 빠뜨린 호출) Chroma가 TypeError를 던지고,
+        # 이 호출은 _rerank의 try 바깥이라 질문 전체가 실패한다. k로 물러난다.
+        fetch_k = (self.candidate_k or self.k) if self.rerank else self.k
         results = self.vector_store.similarity_search_with_relevance_scores(
-            query, k=self.k, filter=self.search_filter
+            query, k=fetch_k, filter=self.search_filter
         )
         # 점수는 반드시 재배치 "전"에 심는다. 재배치하면 문서 순서가 바뀌면서
         # results의 (doc, score) 짝을 더는 위치로 복원할 수 없다.
@@ -176,10 +185,40 @@ class ScoringRetriever(BaseRetriever):
             doc.metadata["similarity_score"] = score
 
         docs = [doc for doc, _ in results]
+        if self.rerank:
+            docs = self._rerank(query, docs)
+
         if not self.reorder:
             return docs
         # transform_documents는 Sequence를 돌려주므로 List로 맞춘다.
         return list(_LONG_CONTEXT_REORDER.transform_documents(docs))
+
+    def _rerank(self, query: str, docs: List[Document]) -> List[Document]:
+        """크로스인코더로 재채점해 상위 k개만 남긴다.
+
+        리랭킹은 품질 개선이지 정확성 요건이 아니다. 모델 로드 실패든 추론
+        실패든, 실패하면 벡터 순서 상위 k개로 물러나고 질문은 성공시킨다.
+        """
+        try:
+            reranker = self.reranker or get_reranker()
+            scores = reranker.score(query, docs)
+            if len(scores) != len(docs):
+                # zip이 조용히 잘라내는 대신 여기서 잡는다.
+                raise ValueError(
+                    f"reranker returned {len(scores)} scores for {len(docs)} documents"
+                )
+        except Exception as exc:
+            logger.warning(
+                "Reranking failed, using vector order: %s", exc, exc_info=True
+            )
+            return docs[: self.k]
+
+        for doc, score in zip(docs, scores):
+            doc.metadata["rerank_score"] = score
+        ranked = sorted(
+            docs, key=lambda doc: doc.metadata["rerank_score"], reverse=True
+        )
+        return ranked[: self.k]
 
 
 class RAGService:
@@ -268,6 +307,8 @@ class RAGService:
             k=settings.retrieval_k,
             search_filter=search_filter,
             reorder=settings.retrieval_reorder,
+            rerank=settings.rerank_enabled,
+            candidate_k=settings.rerank_candidate_k,
         )
 
         try:
@@ -322,9 +363,17 @@ class RAGService:
         # 0.0이 아니라 -inf인 이유: 관련성 점수는 음수가 될 수 있다. Chroma
         # 컬렉션이 hnsw:space 없이 만들어져 LangChain이 유클리드 변환식
         # (1 - distance/sqrt(2))을 쓰기 때문이다.
+        # 리랭킹을 거친 응답은 리랭크 점수가 기준이다. 한 응답의 문서는 전부
+        # 리랭킹을 거쳤거나 전부 거치지 않았거나 둘 중 하나이므로(폴백도 요청
+        # 단위다) 두 점수 체계가 한 정렬에 섞이지 않는다.
+        score_key = (
+            "rerank_score"
+            if any("rerank_score" in doc.metadata for doc in source_docs)
+            else "similarity_score"
+        )
         ordered_docs = sorted(
             source_docs,
-            key=lambda doc: doc.metadata.get("similarity_score") or float("-inf"),
+            key=lambda doc: doc.metadata.get(score_key) or float("-inf"),
             reverse=True,
         )
 
@@ -347,6 +396,7 @@ class RAGService:
                 page=doc.metadata.get("page"),
                 chunk_index=doc.metadata.get("chunk_index", 0),
                 similarity_score=doc.metadata.get("similarity_score"),
+                rerank_score=doc.metadata.get("rerank_score"),
                 image_urls=image_urls,
             )
             formatted_sources.append(source)
